@@ -70,7 +70,7 @@ class VideoWidget(Image):
 
 class VideoApp(App):
     def build(self):
-        return VideoWidget("sample.mp4")
+        return VideoWidget(os.path.join(self.directory, "sample.mp4"))
 
 if __name__ == "__main__":
     VideoApp().run()
