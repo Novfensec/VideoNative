@@ -1,18 +1,34 @@
-NDK := /path/to/android/ndk
+# Android NDK setup
+NDK := /path/to/android-ndk
 TOOLCHAIN := $(NDK)/toolchains/llvm/prebuilt/linux-x86_64
 API := 34
 CC := $(TOOLCHAIN)/bin/aarch64-linux-android$(API)-clang
-CXX := $(TOOLCHAIN)/bin/aarch64-linux-android$(API)-clang++
-CFLAGS := -fPIC -O2 -Wall
-LDFLAGS := -shared
 
-SRC := libvideo.c
+# Paths to FFmpeg headers and libs (adjust to your build output)
+FFMPEG_INCLUDE := $(PWD)/include
+FFMPEG_LIB := $(PWD)/lib
+
+# Compiler and linker flags
+CFLAGS := -fPIC -O2 -Wall -I$(FFMPEG_INCLUDE)
+LDFLAGS := -shared -L$(FFMPEG_LIB) \
+           -lavcodec -lavformat -lavutil -lswresample -lswscale
+
+# Sources and output
+SRC := libvideo.c another_module.c jni_bridge.c
+OBJ := $(SRC:.c=.o)
 OUT := libvideo.so
 
+# Default target
 all: $(OUT)
 
-$(OUT): $(SRC)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+# Rule to build .so
+$(OUT): $(OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS)
 
+# Rule to build .o files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Clean
 clean:
-	rm -f $(OUT)
+	rm -f $(OBJ) $(OUT)
