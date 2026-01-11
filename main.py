@@ -14,6 +14,12 @@ if platform == "win":
     lib = ctypes.CDLL(os.path.abspath(os.path.join(os.path.dirname(__file__), "bin", "windows", "libvideo.dll")))
 elif platform == "linux":
     lib = ctypes.CDLL(os.path.abspath(os.path.join(os.path.dirname(__file__), "bin", "linux", "libvideo.so")))
+elif platform == "android":
+    from jnius import autoclass
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    mActivity = PythonActivity.mActivity
+    libs_dir = mActivity.getApplicationInfo().nativeLibraryDir
+    lib = ctypes.CDLL(os.path.join(libs_dir, "libvideo.so"))
 
 lib.vr_open.argtypes = [ctypes.c_char_p]
 lib.vr_open.restype = ctypes.c_void_p
