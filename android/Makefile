@@ -14,7 +14,7 @@ LDFLAGS := -shared -L$(FFMPEG_LIB) \
            -lavcodec -lavformat -lavutil -lswresample -lswscale
 
 # Sources and output
-SRC := libvideo.c another_module.c jni_bridge.c
+SRC := libvideo.c
 OBJ := $(SRC:.c=.o)
 OUT := libvideo.so
 
