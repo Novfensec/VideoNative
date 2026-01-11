@@ -2,6 +2,14 @@
 
 Install visual cpp build tools for building on windows.
 
+[Install FFmpeg from https://gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
+
+```
+winget install Gyan.FFmpeg.Shared
+```
+
+Copy all files under `ffmpegdirectory/bin` folder to `./bin/windows`.
+
 Steps to build the dll (Windows):
 
 ```
@@ -10,5 +18,3 @@ nmake
 ```
 
 After compiling move the `libvideo.dll` to `bin/windows` folder.
-
-[Install FFmpeg from https://gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
