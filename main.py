@@ -8,6 +8,7 @@ from kivy.graphics.texture import Texture
 from kivy.core.window import Window
 
 Window.maximize()
+Window.clearcolor = [1, 1, 1, 1]
 
 if platform == "win":
     lib = ctypes.CDLL(os.path.abspath(os.path.join(os.path.dirname(__file__), "bin", "windows", "libvideo.dll")))
@@ -41,8 +42,6 @@ class VideoWidget(Image):
         self.height_px = lib.vr_get_height(self.vr)
 
         self.texture = Texture.create(size=(self.width_px, self.height_px), colorfmt='rgb')
-        self.texture.mag_filter = 'linear'
-        self.texture.min_filter = 'linear'
         self.texture.flip_vertical()
 
         fps = lib.vr_get_fps(self.vr)
