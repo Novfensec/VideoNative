@@ -8,6 +8,7 @@ A way of rendering video in kivy.
 
 ## Build Instructions
 
+### Windows
 Install visual cpp build tools for building on windows.
 ```
 winget install Microsoft.VisualStudio.BuildTools
@@ -29,3 +30,22 @@ nmake
 ```
 
 After compiling move the `libvideo.dll` to `bin/windows` folder.
+
+### Linux
+- Move to `linux` directory.
+```
+cd linux
+```
+
+- Install ffmpeg and other libs.
+```
+sudo apt install ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+```
+
+- Build using make
+```
+make clean
+make
+```
+
+Move the compiled `libvideo.so` to bin/linux folder.
