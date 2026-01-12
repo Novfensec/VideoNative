@@ -73,7 +73,7 @@ class VideoWidget(Image):
         self.fps = lib.vr_get_fps(self.vr)
         self.play(self.fps)
 
-    def update_frame(self, dt):
+    def update_frame(self, *args) -> None:
         if lib.vr_read_frame(self.vr):
             buf_ptr = lib.vr_get_rgb(self.vr)
             size = self.width_px * self.height_px * 3
@@ -97,9 +97,15 @@ class VideoWidget(Image):
         self._running = True
 
     def stop(self, *args) -> None:
+        try:
+            lib.vr_read_frame(self.vr)
+        except:
+            return
         Clock.unschedule(self.update_frame)
         self._running = False
-        lib.vr_close(self.vr)
+        if self.vr:
+            lib.vr_close(self.vr)
+            self.vr = None
 
     def pause(self, *args) -> None:
         Clock.unschedule(self.update_frame)
@@ -118,6 +124,7 @@ class VideoWidget(Image):
         else:
             new_time = current_time - offset
             lib.vr_seek_backward(self.vr, new_time)
+        self.update_frame()
 
 
 
