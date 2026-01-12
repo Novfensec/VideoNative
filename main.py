@@ -57,8 +57,8 @@ class VideoWidget(Image):
         if lib.vr_read_frame(self.vr):
             buf_ptr = lib.vr_get_rgb(self.vr)
             size = self.width_px * self.height_px * 3
-            buf = ctypes.string_at(buf_ptr, size)
-
+            # buf = ctypes.string_at(buf_ptr, size)
+            buf = memoryview((ctypes.c_ubyte * size).from_address(ctypes.cast(buf_ptr, ctypes.c_void_p).value))
             self.texture.blit_buffer(buf,
                                     size=(self.width_px, self.height_px),
                                     colorfmt='rgb',
@@ -70,7 +70,7 @@ class VideoWidget(Image):
 
 class VideoApp(App):
     def build(self):
-        return VideoWidget(os.path.join(self.directory, "sample.mp4"))
+        return VideoWidget(os.path.join(self.directory, "sample120fps.mp4"))
 
 if __name__ == "__main__":
     VideoApp().run()
