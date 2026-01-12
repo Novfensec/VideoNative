@@ -104,3 +104,56 @@ double vr_get_fps(VideoReader *vr) {
     AVRational fr = vr->fmt_ctx->streams[vr->video_stream_index]->avg_frame_rate;
     return av_q2d(fr);
 }
+
+// Get current playback timestamp in seconds
+double vr_get_pts(VideoReader *vr) {
+    if (!vr || !vr->frame) return 0.0;
+    AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
+    if (vr->frame->pts == AV_NOPTS_VALUE) return 0.0;
+    return vr->frame->pts * av_q2d(stream->time_base);
+}
+
+// Seek forward by offset seconds
+int vr_seek_forward(VideoReader *vr, double offset) {
+    if (!vr || !vr->fmt_ctx) return -1;
+
+    // Get current PTS in seconds
+    double current = 0.0;
+    if (vr->frame && vr->frame->pts != AV_NOPTS_VALUE) {
+        AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
+        current = vr->frame->pts * av_q2d(stream->time_base);
+    }
+
+    double target = current + offset;
+    AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
+    int64_t ts = (int64_t)(target / av_q2d(stream->time_base));
+
+    if (av_seek_frame(vr->fmt_ctx, vr->video_stream_index, ts, AVSEEK_FLAG_ANY) < 0)
+        return -1;
+
+    avcodec_flush_buffers(vr->codec_ctx);
+    return 0;
+}
+
+// Seek backward by offset seconds
+int vr_seek_backward(VideoReader *vr, double offset) {
+    if (!vr || !vr->fmt_ctx) return -1;
+
+    double current = 0.0;
+    if (vr->frame && vr->frame->pts != AV_NOPTS_VALUE) {
+        AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
+        current = vr->frame->pts * av_q2d(stream->time_base);
+    }
+
+    double target = current - offset;
+    if (target < 0.0) target = 0.0; // clamp at start
+
+    AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
+    int64_t ts = (int64_t)(target / av_q2d(stream->time_base));
+
+    if (av_seek_frame(vr->fmt_ctx, vr->video_stream_index, ts, AVSEEK_FLAG_BACKWARD) < 0)
+        return -1;
+
+    avcodec_flush_buffers(vr->codec_ctx);
+    return 0;
+}

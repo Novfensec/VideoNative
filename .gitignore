@@ -9,7 +9,7 @@ __pycache__/
 *.obj
 *.dll
 *.exe
-
+*.mp4
 # vscode
 .vscode/
 

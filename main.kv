@@ -1,0 +1,63 @@
+#: import Window kivy.core.window.Window
+
+CScreen:
+
+    CStackLayout:
+        size_hint: 1, 1
+
+        CAnchorLayout:
+            size_hint: 1, 1
+
+            VideoWidget:
+                canvas.before:
+                    Color:
+                        rgba: 0, 0, 0, 1
+                    Rectangle:
+                        pos: self.pos
+                        size: self.size
+                id: video_widget
+                size_hint: 1, 1
+                filename: "sample4k.mp4"
+                fit_mode: "contain"
+
+            CRelativeLayout:
+                size_hint: 1, 1
+                pos_hint: {"x": 0, "y": 0}
+
+                CBoxLayout:
+                    adaptive: [False, True]
+                    padding: dp(16)
+                    spacing: dp(8)
+
+                    CButtonPrimary:
+                        icon: "play" if not video_widget._running else "pause"
+                        role: "Large Productive"
+                        on_release:
+                            video_widget.play() if not video_widget._running else video_widget.pause()
+                    
+                    CButtonPrimary:
+                        icon: "stop"
+                        role: "Large Productive"
+                        on_release:
+                            video_widget.stop()
+
+                    CButtonPrimary:
+                        icon: "skip--back"
+                        role: "Large Productive"
+                        on_release:
+                            video_widget.seek("backward", offset=1.0)
+
+                    CButtonPrimary:
+                        icon: "skip--forward"
+                        role: "Large Productive"
+                        on_release:
+                            video_widget.seek("forward", offset=1.0)
+
+                    CAnchorLayout:
+                        anchor_x: "right"
+
+                        CButtonPrimary:
+                            icon: "maximize" if not Window.fullscreen else "minimize"
+                            role: "Large Productive"
+                            on_press:
+                                app.maximize()

@@ -1,14 +1,16 @@
 import os
 import ctypes
-from kivy.app import App
+from carbonkivy.app import CarbonApp
 from kivy.utils import platform
 from kivy.uix.image import Image
 from kivy.clock import Clock
 from kivy.graphics.texture import Texture
 from kivy.core.window import Window
+from kivy.lang import Builder
+from kivy.properties import StringProperty, BooleanProperty
 
 Window.maximize()
-Window.clearcolor = [1, 1, 1, 1]
+Window.fullscreen = False
 
 if platform == "win":
     lib = ctypes.CDLL(os.path.abspath(os.path.join(os.path.dirname(__file__), "bin", "windows", "libvideo.dll")))
@@ -35,12 +37,30 @@ lib.vr_close.argtypes = [ctypes.c_void_p]
 lib.vr_close.restype = None
 lib.vr_get_fps.argtypes = [ctypes.c_void_p]
 lib.vr_get_fps.restype = ctypes.c_double
+lib.vr_get_pts.argtypes = [ctypes.c_void_p]
+lib.vr_get_pts.restype = ctypes.c_double
+lib.vr_seek_forward.argtypes = [ctypes.c_void_p, ctypes.c_double]
+lib.vr_seek_forward.restype  = ctypes.c_int
+lib.vr_seek_backward.argtypes = [ctypes.c_void_p, ctypes.c_double]
+lib.vr_seek_backward.restype  = ctypes.c_int
 
 
 class VideoWidget(Image):
-    def __init__(self, filename, **kwargs):
+
+    filename = StringProperty()
+
+    _running = BooleanProperty(False)
+
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.vr = lib.vr_open(filename.encode('utf-8'))
+        self.fps = 30.0
+
+    def on_filename(self, *args) -> None:
+        if self.filename:
+            self.open_video()
+
+    def open_video(self, *args) -> None:
+        self.vr = lib.vr_open(self.filename.encode('utf-8'))
         if not self.vr:
             raise RuntimeError("Failed to open video")
 
@@ -50,8 +70,8 @@ class VideoWidget(Image):
         self.texture = Texture.create(size=(self.width_px, self.height_px), colorfmt='rgb')
         self.texture.flip_vertical()
 
-        fps = lib.vr_get_fps(self.vr)
-        Clock.schedule_interval(self.update_frame, 1.0 / fps)
+        self.fps = lib.vr_get_fps(self.vr)
+        self.play(self.fps)
 
     def update_frame(self, dt):
         if lib.vr_read_frame(self.vr):
@@ -65,12 +85,65 @@ class VideoWidget(Image):
                                     bufferfmt='ubyte')
             self.canvas.ask_update()
         else:
-            Clock.unschedule(self.update_frame)
-            lib.vr_close(self.vr)
+            self.stop()
 
-class VideoApp(App):
+    def play(self, *args)-> None:
+        try:
+            lib.vr_read_frame(self.vr)
+        except:
+            self.open_video()
+            return
+        Clock.schedule_interval(self.update_frame, 1.0 / self.fps)
+        self._running = True
+
+    def stop(self, *args) -> None:
+        Clock.unschedule(self.update_frame)
+        self._running = False
+        lib.vr_close(self.vr)
+
+    def pause(self, *args) -> None:
+        Clock.unschedule(self.update_frame)
+        self._running = False
+
+    def seek(self, direction: str, offset: float | int) -> None:
+        try:
+            lib.vr_read_frame(self.vr)
+        except:
+            self.open_video()
+            return
+        current_time = lib.vr_get_pts(self.vr)
+        if direction == "forward":
+            new_time = current_time + offset
+            lib.vr_seek_forward(self.vr, new_time)
+        else:
+            new_time = current_time - offset
+            lib.vr_seek_backward(self.vr, new_time)
+
+
+
+
+class VideoApp(CarbonApp):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        Window.bind(on_key_down=self._on_key_down)
+
     def build(self):
-        return VideoWidget(os.path.join(self.directory, "sample120fps.mp4"))
+        return Builder.load_file(os.path.join(self.directory, "main.kv"))
+
+        # return VideoWidget(os.path.join(self.directory, "sample4k.mp4"))
+    def _on_key_down(self, window, key, scancode, codepoint, modifiers):
+        # F11 key has keycode 293 on most systems
+        print(key)
+        if key == 292:  
+            self.maximize()
+        return True
+
+    def maximize(self, *args) -> None:
+        if Window.fullscreen:
+            Window.fullscreen = False
+        else:
+            Window.fullscreen = True
 
 if __name__ == "__main__":
     VideoApp().run()
