@@ -100,6 +100,14 @@ int vr_get_height(VideoReader *vr)
     return vr->height;
 }
 
+// Get the duration of the video
+int64_t vr_get_duration(VideoReader *vr)
+{
+    if (!vr || !vr->fmt_ctx)
+        return -1;
+    return vr->fmt_ctx->streams[vr->video_stream_index]->duration;
+}
+
 // Close the video reader and free resources
 void vr_close(VideoReader *vr)
 {
@@ -166,6 +174,49 @@ int vr_seek_backward(VideoReader *vr, double offset)
 
     if (av_seek_frame(vr->fmt_ctx, vr->video_stream_index, ts, AVSEEK_FLAG_BACKWARD) < 0)
         return -1;
+
+    avcodec_flush_buffers(vr->codec_ctx);
+    return 0;
+}
+
+// Stop and seek to start or end of the video
+// mode = 0 → go to start
+// mode = 1 → go to end
+int vr_stop(VideoReader *vr, int mode)
+{
+    if (!vr || !vr->fmt_ctx)
+        return -1;
+
+    int stream_index = vr->video_stream_index;
+    int64_t ts;
+
+    if (mode == 0)
+    {
+        ts = 0;
+    }
+    else
+    {
+        AVStream *stream = vr->fmt_ctx->streams[stream_index];
+        int64_t duration = stream->duration;
+        if (duration == AV_NOPTS_VALUE)
+        {
+            duration = vr->fmt_ctx->duration;
+        }
+
+        double fps = vr_get_fps(vr);
+        if (fps <= 0.0)
+            fps = 25.0;
+        int64_t one_frame_ts = (int64_t)(stream->time_base.den / (fps * stream->time_base.num));
+
+        ts = duration - one_frame_ts;
+        if (ts < 0)
+            ts = 0;
+    }
+
+    if (av_seek_frame(vr->fmt_ctx, stream_index, ts, AVSEEK_FLAG_BACKWARD) < 0)
+    {
+        return -1;
+    }
 
     avcodec_flush_buffers(vr->codec_ctx);
     return 0;

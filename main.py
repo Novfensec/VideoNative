@@ -33,6 +33,8 @@ lib.vr_get_width.argtypes = [ctypes.c_void_p]
 lib.vr_get_width.restype = ctypes.c_int
 lib.vr_get_height.argtypes = [ctypes.c_void_p]
 lib.vr_get_height.restype = ctypes.c_int
+lib.vr_get_duration.argtypes = [ctypes.c_void_p]
+lib.vr_get_duration.restype = ctypes.c_int64
 lib.vr_close.argtypes = [ctypes.c_void_p]
 lib.vr_close.restype = None
 lib.vr_get_fps.argtypes = [ctypes.c_void_p]
@@ -43,7 +45,8 @@ lib.vr_seek_forward.argtypes = [ctypes.c_void_p, ctypes.c_double]
 lib.vr_seek_forward.restype  = ctypes.c_int
 lib.vr_seek_backward.argtypes = [ctypes.c_void_p, ctypes.c_double]
 lib.vr_seek_backward.restype  = ctypes.c_int
-
+lib.vr_stop.argtypes = [ctypes.c_void_p, ctypes.c_int]
+lib.vr_stop.restype = ctypes.c_int
 
 class VideoWidget(Image):
 
@@ -57,7 +60,7 @@ class VideoWidget(Image):
 
     def on_filename(self, *args) -> None:
         if self.filename:
-            Clock.schedule_once(self.open_video, 0)
+            self.open_video()
 
     def open_video(self, *args) -> None:
         self.vr = lib.vr_open(self.filename.encode('utf-8'))
@@ -100,7 +103,7 @@ class VideoWidget(Image):
         Clock.unschedule(self.update_frame)
         self._running = False
         if self.vr:
-            lib.vr_seek_backward(self.vr, 0.0)
+            lib.vr_stop(self.vr, 1)
             self.update_frame()
 
     def pause(self, *args) -> None:
