@@ -44,7 +44,7 @@ After compiling move the `libvideo.dll` to `bin/windows` folder.
 
 - Install ffmpeg and other libs.
     ```
-    sudo apt install ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+    sudo apt install build-essential pkg-config ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
     ```
 
 - Build using make

@@ -10,7 +10,7 @@ SRC = libvideo.c
 # Flags
 CFLAGS = -fPIC
 LDFLAGS = -shared
-PKGCONFIG = $(shell pkg-config --cflags --libs libavformat libavcodec libavutil libswscale)
+PKGCONFIG = $(shell pkg-config --cflags --libs libavformat libavcodec libavutil libswscale libswresample)
 
 # Default rule
 all: $(TARGET)
