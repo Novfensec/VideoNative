@@ -117,12 +117,7 @@ __declspec(dllexport) double vr_get_pts(VideoReader *vr) {
 __declspec(dllexport) int vr_seek_forward(VideoReader *vr, double offset) {
     if (!vr || !vr->fmt_ctx) return -1;
 
-    // Get current PTS in seconds
-    double current = 0.0;
-    if (vr->frame && vr->frame->pts != AV_NOPTS_VALUE) {
-        AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
-        current = vr->frame->pts * av_q2d(stream->time_base);
-    }
+    double current = vr_get_pts(vr);
 
     double target = current + offset;
     AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
@@ -139,11 +134,7 @@ __declspec(dllexport) int vr_seek_forward(VideoReader *vr, double offset) {
 __declspec(dllexport) int vr_seek_backward(VideoReader *vr, double offset) {
     if (!vr || !vr->fmt_ctx) return -1;
 
-    double current = 0.0;
-    if (vr->frame && vr->frame->pts != AV_NOPTS_VALUE) {
-        AVStream *stream = vr->fmt_ctx->streams[vr->video_stream_index];
-        current = vr->frame->pts * av_q2d(stream->time_base);
-    }
+    double current = vr_get_pts(vr);
 
     double target = current - offset;
     if (target < 0.0) target = 0.0; // clamp at start
