@@ -57,7 +57,7 @@ class VideoWidget(Image):
 
     def on_filename(self, *args) -> None:
         if self.filename:
-            self.open_video()
+            Clock.schedule_once(self.open_video, 0)
 
     def open_video(self, *args) -> None:
         self.vr = lib.vr_open(self.filename.encode('utf-8'))
@@ -97,36 +97,22 @@ class VideoWidget(Image):
         self._running = True
 
     def stop(self, *args) -> None:
-        try:
-            lib.vr_read_frame(self.vr)
-        except:
-            return
         Clock.unschedule(self.update_frame)
         self._running = False
         if self.vr:
-            lib.vr_close(self.vr)
-            self.vr = None
+            lib.vr_seek_backward(self.vr, 0.0)
+            self.update_frame()
 
     def pause(self, *args) -> None:
         Clock.unschedule(self.update_frame)
         self._running = False
 
     def seek(self, direction: str, offset: float | int) -> None:
-        try:
-            lib.vr_read_frame(self.vr)
-        except:
-            self.open_video()
-            return
-        current_time = lib.vr_get_pts(self.vr)
         if direction == "forward":
-            new_time = current_time + offset
-            lib.vr_seek_forward(self.vr, new_time)
+            lib.vr_seek_forward(self.vr, offset)
         else:
-            new_time = current_time - offset
-            lib.vr_seek_backward(self.vr, new_time)
+            lib.vr_seek_backward(self.vr, offset)
         self.update_frame()
-
-
 
 
 class VideoApp(CarbonApp):
