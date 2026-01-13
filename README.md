@@ -9,43 +9,64 @@ A way of rendering video in kivy.
 ## Build Instructions
 
 ### Windows
-Install visual cpp build tools for building on windows.
-```
-winget install Microsoft.VisualStudio.BuildTools
-```
+- Move to the `windows` directory.
+    ```
+    cd windows
+    ```
 
-[Install FFmpeg from https://gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
+- Install visual cpp build tools for building on windows.
+    ```
+    winget install Microsoft.VisualStudio.BuildTools
+    ```
 
-```
-winget install Gyan.FFmpeg.Shared
-```
+- [Install FFmpeg from https://gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
+    ```
+    winget install Gyan.FFmpeg.Shared
+    ```
 
-Copy all files under `ffmpegdirectory/bin` folder to `./bin/windows`.
+- Copy all files under `ffmpegdirectory/bin` folder to `./bin/windows`.
 
-Steps to build the dll (Windows):
+- Edit `Makefile` accordingly.
 
-```
-nmake clean
-nmake
-```
+- Steps to build the dll (Windows):
+    ```
+    nmake clean
+    nmake
+    ```
 
 After compiling move the `libvideo.dll` to `bin/windows` folder.
 
 ### Linux
 - Move to `linux` directory.
-```
-cd linux
-```
+    ```
+    cd linux
+    ```
 
 - Install ffmpeg and other libs.
-```
-sudo apt install ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
-```
+    ```
+    sudo apt install ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+    ```
 
 - Build using make
+    ```
+    make clean
+    make
+    ```
+
+After compiling move the `libvideo.so` to `bin/linux` folder.
+
+### Android
+
+#### Using [pythonforandroid](https://github.com/kivy/pythonforandroid) toolchain
+
+- Add `videonative` and `ffmpeg` as requirements in buildozer.spec.
+- Use `p4a.fork = novfensec` and `p4a.branch=videonative` to build for android.
+
+#### Manually building from source
+
+For building `libvideo.so` yourself compile the ffmpeg library for the android and make it available in path.
+then move to `android` directory and run make.
 ```
-make clean
+cd android
 make
 ```
-
-Move the compiled `libvideo.so` to bin/linux folder.
