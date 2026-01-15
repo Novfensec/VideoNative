@@ -1,5 +1,8 @@
 import os
 import ctypes
+import sounddevice as sd
+import numpy as np
+import threading
 from carbonkivy.app import CarbonApp
 from kivy.utils import platform
 from kivy.uix.image import Image
@@ -47,6 +50,14 @@ lib.vr_seek_backward.argtypes = [ctypes.c_void_p, ctypes.c_double]
 lib.vr_seek_backward.restype  = ctypes.c_int
 lib.vr_stop.argtypes = [ctypes.c_void_p, ctypes.c_int]
 lib.vr_stop.restype = ctypes.c_int
+lib.vr_read_audio.argtypes = [ctypes.c_void_p]
+lib.vr_read_audio.restype = ctypes.c_int
+lib.vr_get_audio.argtypes = [ctypes.c_void_p]
+lib.vr_get_audio.restype = ctypes.c_void_p
+lib.vr_get_audio_size.argtypes = [ctypes.c_void_p]
+lib.vr_get_audio_size.restype = ctypes.c_int
+lib.vr_get_sample_rate.argtypes = [ctypes.c_void_p]
+lib.vr_get_sample_rate.restype = ctypes.c_int
 
 class VideoWidget(Image):
 
@@ -66,6 +77,13 @@ class VideoWidget(Image):
         self.vr = lib.vr_open(self.filename.encode('utf-8'))
         if not self.vr:
             raise RuntimeError("Failed to open video")
+        self.audio_rate = lib.vr_get_sample_rate(self.vr)
+        self.audio_channels = 2
+        rate = lib.vr_get_sample_rate(self.vr)
+        if rate <= 0 or rate not in (44100, 48000):
+            rate = 44100
+        self.audio_stream = sd.OutputStream(samplerate=rate, channels=2, dtype='int16')
+        self.audio_stream.start()
 
         self.width_px = lib.vr_get_width(self.vr)
         self.height_px = lib.vr_get_height(self.vr)
@@ -77,10 +95,9 @@ class VideoWidget(Image):
         self.play(self.fps)
 
     def update_frame(self, *args) -> None:
-        if lib.vr_read_frame(self.vr):
+        if lib.vr_read_frame(self.vr) == 1:
             buf_ptr = lib.vr_get_rgb(self.vr)
             size = self.width_px * self.height_px * 3
-            # buf = ctypes.string_at(buf_ptr, size)
             buf = memoryview((ctypes.c_ubyte * size).from_address(ctypes.cast(buf_ptr, ctypes.c_void_p).value))
             self.texture.blit_buffer(buf,
                                     size=(self.width_px, self.height_px),
@@ -91,6 +108,18 @@ class VideoWidget(Image):
             self.pause()
             lib.vr_stop(self.vr, 0)
 
+    def play_audio(self, *args) -> None:
+        while lib.vr_read_audio(self.vr) == 1 and self._running:
+            buf_ptr = lib.vr_get_audio(self.vr)
+            size    = lib.vr_get_audio_size(self.vr)
+            if buf_ptr and size > 0:
+                array_type = ctypes.c_ubyte * size
+                raw_array  = array_type.from_address(buf_ptr)
+                buf        = memoryview(raw_array)
+                samples = np.frombuffer(buf, dtype=np.int16)
+                samples = samples.reshape(-1, 2)  # shape (frames, channels)
+                self.audio_stream.write(samples)
+
     def play(self, *args)-> None:
         try:
             lib.vr_read_frame(self.vr)
@@ -100,6 +129,7 @@ class VideoWidget(Image):
             return
         Clock.schedule_interval(self.update_frame, 1.0 / self.fps)
         self._running = True
+        threading.Thread(target=self.play_audio, daemon=True).start()
 
     def stop(self, *args) -> None:
         Clock.unschedule(self.update_frame)
@@ -141,6 +171,13 @@ class VideoApp(CarbonApp):
             Window.fullscreen = False
         else:
             Window.fullscreen = True
+
+    def on_stop(self):
+        if hasattr(self.root.ids.video_widget, 'audio_stream'):
+            self.root.ids.video_widget.audio_stream.stop()
+            self.root.ids.video_widget.audio_stream.close()
+        lib.vr_close(self.root.ids.video_widget.vr)
+        return super().on_stop()
 
 if __name__ == "__main__":
     VideoApp().run()

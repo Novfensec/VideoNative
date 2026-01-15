@@ -3,8 +3,9 @@
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
+#include <libswresample/swresample.h>
 
-// Structure to hold video reader context
+// Structure to hold video + audio reader context
 typedef struct
 {
     AVFormatContext *fmt_ctx;
@@ -15,6 +16,15 @@ typedef struct
     int video_stream_index;
     uint8_t *rgb_buffer;
     int width, height;
+
+    AVCodecContext *audio_ctx;
+    AVFrame *audio_frame;
+    struct SwrContext *swr_ctx;
+    int audio_stream_index;
+    uint8_t *audio_buffer;
+    int audio_buffer_size;
+    int audio_sample_rate;
+    int audio_channels;
 } VideoReader;
 
 // Open a video file and prepare for reading frames
@@ -31,12 +41,23 @@ VideoReader *vr_open(const char *filename)
     AVStream *video_stream = vr->fmt_ctx->streams[vr->video_stream_index];
     const AVCodec *codec = avcodec_find_decoder(video_stream->codecpar->codec_id);
 
+    vr->audio_stream_index = av_find_best_stream(vr->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+    AVStream *audio_stream = vr->fmt_ctx->streams[vr->audio_stream_index];
+    const AVCodec *audio_codec = avcodec_find_decoder(audio_stream->codecpar->codec_id);
+
     vr->codec_ctx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(vr->codec_ctx, video_stream->codecpar);
     avcodec_open2(vr->codec_ctx, codec, NULL);
 
+    vr->audio_ctx = avcodec_alloc_context3(audio_codec);
+    if (avcodec_parameters_to_context(vr->audio_ctx, audio_stream->codecpar) < 0)
+        NULL;
+    if (avcodec_open2(vr->audio_ctx, audio_codec, NULL) < 0)
+        NULL;
+
     vr->frame = av_frame_alloc();
     vr->rgb_frame = av_frame_alloc();
+    vr->audio_frame = av_frame_alloc();
 
     vr->width = vr->codec_ctx->width;
     vr->height = vr->codec_ctx->height;
@@ -51,6 +72,21 @@ VideoReader *vr_open(const char *filename)
                                  vr->width, vr->height, AV_PIX_FMT_RGB24,
                                  SWS_BILINEAR, NULL, NULL, NULL);
 
+    AVChannelLayout out_ch_layout;
+    av_channel_layout_default(&out_ch_layout, 2);
+
+    if (swr_alloc_set_opts2(
+            &vr->swr_ctx,
+            &out_ch_layout,
+            AV_SAMPLE_FMT_S16,
+            vr->audio_ctx->sample_rate,
+            &vr->audio_ctx->ch_layout,
+            vr->audio_ctx->sample_fmt,
+            vr->audio_ctx->sample_rate,
+            0, NULL) == 0)
+    {
+        swr_init(vr->swr_ctx);
+    }
     return vr;
 }
 
@@ -72,6 +108,50 @@ int vr_read_frame(VideoReader *vr)
                               0, vr->height,
                               vr->rgb_frame->data,
                               vr->rgb_frame->linesize);
+                    av_packet_unref(&packet);
+                    return 1;
+                }
+            }
+        }
+        av_packet_unref(&packet);
+    }
+    return 0;
+}
+
+//
+int vr_read_audio(VideoReader *vr)
+{
+    AVPacket packet;
+    while (av_read_frame(vr->fmt_ctx, &packet) >= 0)
+    {
+        if (packet.stream_index == vr->audio_stream_index)
+        {
+            if (avcodec_send_packet(vr->audio_ctx, &packet) == 0)
+            {
+                while (avcodec_receive_frame(vr->audio_ctx, vr->audio_frame) == 0)
+                {
+                    int nb_samples = vr->audio_frame->nb_samples;
+                    int out_linesize;
+
+                    if (vr->audio_buffer)
+                        av_freep(&vr->audio_buffer);
+
+                    av_samples_alloc(&vr->audio_buffer, &out_linesize,
+                                     2, nb_samples, AV_SAMPLE_FMT_S16, 1);
+
+                    int converted = swr_convert(vr->swr_ctx,
+                                                &vr->audio_buffer, nb_samples,
+                                                (const uint8_t **)vr->audio_frame->data,
+                                                nb_samples);
+
+                    vr->audio_buffer_size = av_samples_get_buffer_size(
+                        &out_linesize,
+                        2, converted,
+                        AV_SAMPLE_FMT_S16, 1);
+
+                    vr->audio_sample_rate = vr->audio_ctx->sample_rate;
+                    vr->audio_channels = 2;
+
                     av_packet_unref(&packet);
                     return 1;
                 }
@@ -118,6 +198,10 @@ void vr_close(VideoReader *vr)
     avcodec_free_context(&vr->codec_ctx);
     avformat_close_input(&vr->fmt_ctx);
     av_free(vr);
+    swr_free(&vr->swr_ctx);
+    av_freep(&vr->audio_buffer);
+    av_frame_free(&vr->audio_frame);
+    avcodec_free_context(&vr->audio_ctx);
 }
 
 // Get frames per second of the video
@@ -220,4 +304,19 @@ int vr_stop(VideoReader *vr, int mode)
 
     avcodec_flush_buffers(vr->codec_ctx);
     return 0;
+}
+
+uint8_t *vr_get_audio(VideoReader *vr)
+{
+    return vr->audio_buffer; // filled with PCM samples
+}
+int vr_get_audio_size(VideoReader *vr)
+{
+    return vr->audio_buffer_size; // number of bytes in buffer
+}
+
+// Get audio sample rate
+int vr_get_sample_rate(VideoReader *vr)
+{
+    return vr->audio_sample_rate;
 }

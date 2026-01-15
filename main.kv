@@ -61,3 +61,8 @@ CScreen:
                             role: "Large Productive"
                             on_press:
                                 app.maximize()
+
+            CLoadingIndicator:
+                id: loading_indicator
+                active: not video_widget._running
+                opacity: 0 if video_widget._running else 1
