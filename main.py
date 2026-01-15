@@ -88,12 +88,14 @@ class VideoWidget(Image):
                                     bufferfmt='ubyte')
             self.canvas.ask_update()
         else:
-            self.stop()
+            self.pause()
+            lib.vr_stop(self.vr, 0)
 
     def play(self, *args)-> None:
         try:
             lib.vr_read_frame(self.vr)
         except:
+            lib.vr_stop(self.vr, 0)
             self.open_video()
             return
         Clock.schedule_interval(self.update_frame, 1.0 / self.fps)
@@ -127,9 +129,8 @@ class VideoApp(CarbonApp):
     def build(self):
         return Builder.load_file(os.path.join(self.directory, "main.kv"))
 
-        # return VideoWidget(os.path.join(self.directory, "sample4k.mp4"))
     def _on_key_down(self, window, key, scancode, codepoint, modifiers):
-        # F11 key has keycode 293 on most systems
+        # F11 key has keycode 292 on most systems
         print(key)
         if key == 292:  
             self.maximize()
