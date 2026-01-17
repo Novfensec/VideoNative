@@ -8,6 +8,8 @@ A way of rendering video in kivy.
 
 ## Build Instructions
 
+**Pre-compiled libs are present under `bin` folder.**
+
 ### Windows
 - Move to the `windows` directory.
     ```
