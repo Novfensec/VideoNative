@@ -315,8 +315,9 @@ __declspec(dllexport) int vr_get_audio_size(VideoReader *vr)
     return vr->audio_buffer_size; // number of bytes in buffer
 }
 
-// Get audio sample rate
 __declspec(dllexport) int vr_get_sample_rate(VideoReader *vr)
 {
-    return vr->audio_sample_rate;
+    if (!vr || !vr->audio_ctx)
+        return 44100; // Default fallback
+    return vr->audio_ctx->sample_rate;
 }
