@@ -5,7 +5,7 @@ FFMPEG_LIB="your/ffmpeg/dir/ffmpeg-8.0.1-full_build-shared\lib"
 
 # Compiler and linker flags
 CFLAGS=/LD /I $(FFMPEG_INC)
-LDFLAGS=/LIBPATH:$(FFMPEG_LIB) avformat.lib avcodec.lib avutil.lib swscale.lib
+LDFLAGS=/LIBPATH:$(FFMPEG_LIB) avformat.lib avcodec.lib avutil.lib swscale.lib swresample.lib
 
 # Target
 TARGET=libvideo.dll
