@@ -18,15 +18,21 @@ typedef struct
 } VideoReader;
 
 // Open a video file and prepare for reading frames
-VideoReader *vr_open(const char *filename)
+VideoReader *vr_open(const char *url)
 {
+    avformat_network_init();
 
     VideoReader *vr = av_mallocz(sizeof(VideoReader));
-    if (avformat_open_input(&vr->fmt_ctx, filename, NULL, NULL) < 0)
+    AVDictionary *opts = NULL;
+    av_dict_set(&opts, "timeout", "5000000", 0);
+    av_dict_set(&opts, "rtsp_transport", "tcp", 0);
+    if (avformat_open_input(&vr->fmt_ctx, url, NULL, NULL) < 0)
+    {
         return NULL;
+    }
     if (avformat_find_stream_info(vr->fmt_ctx, NULL) < 0)
         return NULL;
-
+    av_dict_free(&opts);
     vr->video_stream_index = av_find_best_stream(vr->fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
     AVStream *video_stream = vr->fmt_ctx->streams[vr->video_stream_index];
     const AVCodec *codec = avcodec_find_decoder(video_stream->codecpar->codec_id);
@@ -118,6 +124,7 @@ void vr_close(VideoReader *vr)
     avcodec_free_context(&vr->codec_ctx);
     avformat_close_input(&vr->fmt_ctx);
     av_free(vr);
+    avformat_network_deinit();
 }
 
 // Get frames per second of the video
