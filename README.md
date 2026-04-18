@@ -1,6 +1,6 @@
 # VideoNative
 
-A way of rendering video in kivy.
+A way of rendering video in python.
 
 [![Donate via](https://img.shields.io/badge/Donate%20via-Wise-9FE870?style=for-the-badge&logo=wise&labelColor=163300)](https://wise.com/pay/business/kartavyashukla)
 
