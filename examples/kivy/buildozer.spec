@@ -112,7 +112,7 @@ android.presplash_color = #FFFFFF
 android.api = 36
 
 # (int) Minimum API your APK / AAB will support.
-android.minapi = 30
+android.minapi = 24
 
 # (int) Android SDK version to use
 #android.sdk = 20
@@ -121,7 +121,7 @@ android.minapi = 30
 android.ndk = 28c
 
 # (int) Android NDK API to use. This is the minimum API your app will support, it should usually match android.minapi.
-#android.ndk_api = 21
+android.ndk_api = 24
 
 # (str) Android NDK directory (if empty, it will be automatically downloaded.)
 #android.ndk_path =
@@ -364,7 +364,7 @@ p4a.branch = videonative
 #p4a.setup_py = false
 
 # (str) extra command line arguments to pass when invoking pythonforandroid.toolchain
-#p4a.extra_args =
+p4a.extra_args = --extra-index-url https://anshdadwal.is-a.dev/p4a-wheels/p4a
 
 
 
