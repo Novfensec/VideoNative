@@ -2,6 +2,9 @@
 
 Rendering videos in python.
 
+Thanks to miniaudio contributors.
+GitHub:        https://github.com/mackron/miniaudio
+
 [![Donate via](https://img.shields.io/badge/Donate%20via-Wise-9FE870?style=for-the-badge&logo=wise&labelColor=163300)](https://wise.com/pay/business/kartavyashukla)
 
 [![Donate via PayPal](https://img.shields.io/badge/Donate%20via-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.me/KARTAVYASHUKLA)
