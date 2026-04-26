@@ -5,4 +5,4 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "videonative"
 version = "1.0.0"
-description = "Native Cross-Platform C++ FFmpeg Video Decoder"
+description = "Rendering videos in Python."

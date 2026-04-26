@@ -1,6 +1,6 @@
 # VideoNative
 
-A way of rendering video in python.
+Rendering videos in python.
 
 [![Donate via](https://img.shields.io/badge/Donate%20via-Wise-9FE870?style=for-the-badge&logo=wise&labelColor=163300)](https://wise.com/pay/business/kartavyashukla)
 
@@ -8,54 +8,51 @@ A way of rendering video in python.
 
 ## Build Instructions
 
-**Pre-compiled libs are present under `bin` folder.**
-
 ### Windows
-- Move to the `windows` directory.
-    ```
-    cd windows
-    ```
 
 - Install visual cpp build tools for building on windows.
     ```
     winget install Microsoft.VisualStudio.BuildTools
     ```
 
-- [Install FFmpeg from https://gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
-    ```
-    winget install Gyan.FFmpeg.Shared
+- [Download FFmpeg](https://github.com/BtbN/FFmpeg-Builds/releases/download/)
+
+    > Powershell commands below
+
+    ```powershell
+    cd "$env:USERPROFILE\Downloads"
+
+    wget https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip -OutFile ffmpeg.zip
+
+    Expand-Archive -Path ffmpeg.zip -DestinationPath . -Force
+
+    Rename-Item -Path "ffmpeg-master-latest-win64-gpl-shared" -NewName "ffmpeg"
     ```
 
-- Copy all files under `ffmpegdirectory/bin` folder to `./bin/windows`.
-
-- Edit `Makefile` accordingly.
-
-- Steps to build the dll (Windows):
+- Build the `videonative` extension:
     ```
-    nmake clean
-    nmake
-    ```
+    mkdir build
+    cd build
 
-After compiling move the `libvideo.dll` to `bin/windows` folder.
+    cmake ..
+    cmake --build . --config Release
+    ```
 
 ### Linux
-- Move to `linux` directory.
-    ```
-    cd linux
-    ```
 
-- Install ffmpeg and other libs.
+- Install ffmpeg and build-essential.
     ```
     sudo apt install build-essential pkg-config ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
     ```
 
-- Build using make
+- Build the `videonative` extension:
     ```
-    make clean
+    mkdir build
+    cd build
+
+    cmake ..
     make
     ```
-
-After compiling move the `libvideo.so` to `bin/linux` folder.
 
 ### Android
 
@@ -63,12 +60,3 @@ After compiling move the `libvideo.so` to `bin/linux` folder.
 
 - Add `videonative` and `ffmpeg` as requirements in buildozer.spec.
 - Use `p4a.fork = novfensec` and `p4a.branch=videonative` to build for android.
-
-#### Manually building from source
-
-For building `libvideo.so` yourself compile the ffmpeg library for the android and make it available in path.
-then move to `android` directory and run make.
-```
-cd android
-make
-```
