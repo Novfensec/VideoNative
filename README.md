@@ -25,7 +25,7 @@ ffmpeg: https://ffmpeg.org/
 
 - Install via pip:
     ```bash
-    pip install [https://github.com/Novfensec/VideoNative/archive/main.zip](https://github.com/Novfensec/VideoNative/archive/main.zip) --no-cache
+    pip install https://github.com/Novfensec/VideoNative/archive/main.zip --no-cache
     ```
 
 OR
@@ -52,7 +52,7 @@ OR
 
 - Install via pip:
     ```bash
-    pip install [https://github.com/Novfensec/VideoNative/archive/main.zip](https://github.com/Novfensec/VideoNative/archive/main.zip) --no-cache
+    pip install https://github.com/Novfensec/VideoNative/archive/main.zip --no-cache
     ```
 
 OR
