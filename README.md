@@ -10,7 +10,7 @@ ffmpeg: https://ffmpeg.org/
 
 [![Donate via PayPal](https://img.shields.io/badge/Donate%20via-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.me/KARTAVYASHUKLA)
 
-## Build Instructions
+## Build and Install Instructions
 
 ### Windows
 
@@ -33,6 +33,13 @@ ffmpeg: https://ffmpeg.org/
     Rename-Item -Path "ffmpeg-master-latest-win64-gpl-shared" -NewName "ffmpeg"
     ```
 
+- Install via pip:
+    ```
+    pip install https://github.com/Novfensec/VideoNative/archive/main.zip --no-cache
+    ```
+
+OR
+
 - Build the `videonative` extension:
     ```
     pip install build
@@ -53,6 +60,13 @@ ffmpeg: https://ffmpeg.org/
     ```
     sudo apt install build-essential pkg-config ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
     ```
+
+- Install via pip:
+    ```
+    pip install https://github.com/Novfensec/VideoNative/archive/main.zip --no-cache
+    ```
+
+OR
 
 - Build the `videonative` extension:
     ```
