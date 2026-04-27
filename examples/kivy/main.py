@@ -8,7 +8,6 @@ if platform == "win":
     os.add_dll_directory(
         os.path.join(os.path.expanduser("~"), "Downloads", "ffmpeg", "bin")
     )  # Replace with the path of your ffmpeg dll bin directory. Only for windows.
-    # os.add_dll_directory(r"C:\Users\karta\Desktop\computer.nx\NativePython\videonative\experiments\bin\windows")
 
 from carbonkivy.app import CarbonApp
 from kivy.uix.image import Image
