@@ -2,8 +2,9 @@
 
 Rendering videos in python.
 
-Thanks to miniaudio contributors.
-GitHub:        https://github.com/mackron/miniaudio
+Thanks to ffmpeg and miniaudio contributors.
+miniaudio: https://miniaud.io/
+ffmpeg: https://ffmpeg.org/
 
 [![Donate via](https://img.shields.io/badge/Donate%20via-Wise-9FE870?style=for-the-badge&logo=wise&labelColor=163300)](https://wise.com/pay/business/kartavyashukla)
 
