@@ -35,6 +35,11 @@ ffmpeg: https://ffmpeg.org/
 
 - Build the `videonative` extension:
     ```
+    pip install build
+    python -m build
+    ```
+    OR
+    ```
     mkdir build
     cd build
 
@@ -50,6 +55,11 @@ ffmpeg: https://ffmpeg.org/
     ```
 
 - Build the `videonative` extension:
+    ```
+    pip install build
+    python -m build
+    ```
+    OR
     ```
     mkdir build
     cd build
