@@ -62,7 +62,9 @@ jobs:
             libportmidi-dev \
             libswscale-dev \
             libavformat-dev \
+            libavutil-dev \
             libavcodec-dev \
+            libswresample-dev \
             libunwind-dev \
             zlib1g-dev \
             autoconf-archive
