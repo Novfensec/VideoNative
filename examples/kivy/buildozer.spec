@@ -364,7 +364,7 @@ p4a.branch = videonative
 #p4a.setup_py = false
 
 # (str) extra command line arguments to pass when invoking pythonforandroid.toolchain
-p4a.extra_args = --extra-index-url https://anshdadwal.is-a.dev/p4a-wheels/p4a
+# p4a.extra_args = --extra-index-url https://anshdadwal.is-a.dev/p4a-wheels/p4a
 
 
 
