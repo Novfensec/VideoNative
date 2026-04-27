@@ -52,3 +52,5 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 else()
     target_compile_options(videonative PRIVATE -O3)
 endif()
+
+install(TARGETS videonative DESTINATION .)
