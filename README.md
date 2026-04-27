@@ -18,7 +18,7 @@ ffmpeg: https://ffmpeg.org/
 - Download FFmpeg:
     ```powershell
     cd "$env:USERPROFILE\Downloads"
-    wget [https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip](https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip) -OutFile ffmpeg.zip
+    wget https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip -OutFile ffmpeg.zip
     Expand-Archive -Path ffmpeg.zip -DestinationPath . -Force
     Rename-Item -Path "ffmpeg-master-latest-win64-gpl-shared" -NewName "ffmpeg"
     ```
