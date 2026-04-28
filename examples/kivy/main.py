@@ -19,9 +19,9 @@ from kivy.properties import StringProperty, BooleanProperty
 
 import videonative
 
-Window.maximize()
+if platform not in ["android", "ios"]:
+    Window.maximize()
 Window.fullscreen = False
-
 
 class VideoWidget(Image):
     filename = StringProperty()
@@ -37,11 +37,10 @@ class VideoWidget(Image):
 
     def on_filename(self, *args) -> None:
         if self.filename:
-            self.open_video()
+            Clock.schedule_once(self.open_video, 1)
 
     def open_video(self, *args) -> None:
         self.decoder = videonative.MediaDecoder(self.filename)
-
         self.decoder.start()
 
         first_frame = self.decoder.get_next_frame()
@@ -69,7 +68,9 @@ class VideoWidget(Image):
             frame_arr = self.decoder.get_next_frame()
 
             if frame_arr is None:
-                self.frame_queue.put(None)
+                # CRITICAL FIX: Only treat None as EOF if we didn't deliberately pause/seek
+                if self._running:
+                    self.frame_queue.put(None)
                 break
 
             self.frame_queue.put(frame_arr.tobytes())
@@ -93,10 +94,10 @@ class VideoWidget(Image):
             self.canvas.ask_update()
 
         except queue.Empty:
+            # Safe to pass here! The UI just freezes on the last frame while C++ is pre-rolling!
             pass
 
     def play(self, *args) -> None:
-
         if self._running:
             return
 
@@ -112,38 +113,57 @@ class VideoWidget(Image):
         Clock.schedule_interval(self.update_frame, 1.0 / self.fps)
 
     def stop(self, *args) -> None:
-        Clock.unschedule(self.update_frame)
         self._running = False
+        Clock.unschedule(self.update_frame)
 
         while not self.frame_queue.empty():
-            self.frame_queue.get()
+            try:
+                self.frame_queue.get_nowait()
+            except queue.Empty:
+                break
 
         if self.read_thread and self.read_thread.is_alive():
-            self.read_thread.join(timeout=1.0)
+            self.read_thread.join(timeout=0.5)
 
         if self.decoder:
             self.decoder.stop()
 
     def pause(self, *args) -> None:
-        self.decoder.pause()
+        # CRITICAL FIX: Set running to False instantly to lock out the reader thread
+        self._running = False 
+        
+        if self.decoder:
+            self.decoder.pause()
+            
         Clock.unschedule(self.update_frame)
-        self._running = False
 
+        # Clear the queue to unblock the thread if it's stuck trying to put()
         while not self.frame_queue.empty():
-            self.frame_queue.get()
+            try:
+                self.frame_queue.get_nowait()
+            except queue.Empty:
+                break
+                
+        # Lowered timeout. C++ yields instantly now, so we don't need to freeze the UI for a full second
+        if self.read_thread and self.read_thread.is_alive():
+            self.read_thread.join(timeout=0.2)
+            self.read_thread = None
 
     def seek(self, offset: float | int) -> None:
+        if not self.decoder:
+            return
+            
         was_running = self._running
         current_pos = self.decoder.get_position()
+        
         if was_running:
-            self.pause()
+            self.pause() 
 
-        if self.decoder:
-            self.decoder.seek(current_pos + offset)
+        new_pos = max(0.0, current_pos + offset)
+        self.decoder.seek(new_pos)
 
         if was_running:
             self.play()
-
 
 class VideoApp(CarbonApp):
 

@@ -1,3 +1,5 @@
+
+
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 
@@ -10,6 +12,7 @@
 #include <chrono>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 // --- MINIAUDIO (Cross-Platform Audio) ---
 #define MINIAUDIO_IMPLEMENTATION
@@ -36,11 +39,23 @@ private:
     std::atomic<bool> is_running{false};
     std::atomic<bool> is_paused{false};
 
+    std::atomic<bool> is_buffering{true}; // Start in buffering state
+    std::atomic<double> demuxed_video_time{0.0};
+    const double HIGH_WATERMARK_SEC = 10.0;
+    const double LOW_WATERMARK_SEC = 3.0;
+    const double PREROLL_SEC = 3.0;
+
+    // --- SEEK SYNCHRONIZATION ---
     std::atomic<bool> seek_requested{false};
     std::atomic<double> seek_pos_sec{0.0};
-    std::atomic<double> current_pts{0.0};
+    std::mutex seek_mutex;
+    std::condition_variable seek_cv;
+    bool seek_completed = false;
 
+    // --- A/V CLOCKS ---
+    std::atomic<double> current_pts{0.0};
     std::atomic<double> audio_clock{0.0};
+    std::atomic<bool> reset_audio_clock{false};
 
     AVFormatContext *fmt_ctx = nullptr;
     AVCodecContext *video_codec_ctx = nullptr;
@@ -78,9 +93,11 @@ private:
     static void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount)
     {
         MediaDecoder *decoder = (MediaDecoder *)pDevice->pUserData;
-        if (!decoder || decoder->is_paused)
+
+        // Output silence if paused OR actively buffering (pre-rolling)
+        if (!decoder || decoder->is_paused || decoder->is_buffering)
         {
-            memset(pOutput, 0, frameCount * AUDIO_CHANNELS * sizeof(int16_t)); // Output silence if paused
+            memset(pOutput, 0, frameCount * AUDIO_CHANNELS * sizeof(int16_t));
             return;
         }
 
@@ -109,6 +126,7 @@ private:
         std::lock_guard<std::mutex> p_lock(pcm_mutex);
         std::lock_guard<std::mutex> vc_lock(video_codec_mutex);
         std::lock_guard<std::mutex> ac_lock(audio_codec_mutex);
+
         while (!video_pkt_queue.empty())
         {
             AVPacket *p = video_pkt_queue.front();
@@ -133,6 +151,10 @@ private:
             avcodec_flush_buffers(video_codec_ctx);
         if (audio_codec_ctx)
             avcodec_flush_buffers(audio_codec_ctx);
+
+        // Reset time trackers to prevent false buffer health readings
+        demuxed_video_time.store(seek_pos_sec.load());
+        current_pts.store(seek_pos_sec.load());
     }
 
     void demux_worker()
@@ -142,20 +164,44 @@ private:
         {
             if (seek_requested)
             {
-                int64_t target_pts = (int64_t)(seek_pos_sec / av_q2d(fmt_ctx->streams[video_stream_index]->time_base));
-
-                av_seek_frame(fmt_ctx, video_stream_index, target_pts, AVSEEK_FLAG_BACKWARD);
+                // Seek the global file context so audio jumps too
+                int64_t target_pts = (int64_t)(seek_pos_sec * AV_TIME_BASE);
+                av_seek_frame(fmt_ctx, -1, target_pts, AVSEEK_FLAG_BACKWARD);
 
                 flush_queues();
 
-                seek_requested = false;
+                {
+                    std::lock_guard<std::mutex> lock(seek_mutex);
+                    seek_requested = false;
+                    seek_completed = true;
+                }
+
+                seek_cv.notify_all();
                 frame_cv.notify_all();
+                audio_pkt_cv.notify_all();
                 continue;
             }
 
-            if (video_pkt_queue.size() > 300 || pcm_buffer.size() > AUDIO_SAMPLE_RATE * 4 * 10)
+            // --- SMART BUFFER HEALTH CALCULATION ---
+            double playback_time = current_pts.load();
+            double demux_time = demuxed_video_time.load();
+            double buffer_health_sec = std::max(0.0, demux_time - playback_time);
+
+            // Pre-roll check: Are we buffering and have we gathered enough data to resume?
+            if (is_buffering && buffer_health_sec >= PREROLL_SEC)
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                is_buffering = false;
+                frame_cv.notify_all(); // Wake up Kivy frame requests
+            }
+
+            // High Watermark Check: Do we have 10+ seconds? Go to sleep until we drop to 3 seconds.
+            if (!is_buffering && buffer_health_sec > HIGH_WATERMARK_SEC)
+            {
+                std::unique_lock<std::mutex> sleep_lock(seek_mutex);
+                seek_cv.wait_for(sleep_lock, std::chrono::milliseconds(50), [this]
+                                 { 
+                    double health = std::max(0.0, demuxed_video_time.load() - current_pts.load());
+                    return seek_requested.load() || !is_running.load() || health < LOW_WATERMARK_SEC; });
                 continue;
             }
 
@@ -163,6 +209,11 @@ private:
             {
                 if (packet->stream_index == video_stream_index)
                 {
+                    if (packet->pts != AV_NOPTS_VALUE)
+                    {
+                        demuxed_video_time.store(packet->pts * av_q2d(fmt_ctx->streams[video_stream_index]->time_base));
+                    }
+
                     std::lock_guard<std::mutex> lock(video_pkt_mutex);
                     video_pkt_queue.push(av_packet_clone(packet));
                     video_pkt_cv.notify_one();
@@ -176,9 +227,18 @@ private:
             }
             else
             {
+                // EOF Reached! Force resume if we were trying to pre-roll the end of the file.
+                if (is_buffering)
+                {
+                    is_buffering = false;
+                    frame_cv.notify_all();
+                }
+
                 if (!seek_requested)
                 {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // EOF
+                    std::unique_lock<std::mutex> sleep_lock(seek_mutex);
+                    seek_cv.wait_for(sleep_lock, std::chrono::milliseconds(100), [this]
+                                     { return seek_requested.load() || !is_running; });
                 }
             }
             av_packet_unref(packet);
@@ -219,7 +279,16 @@ private:
                 {
                     while (avcodec_receive_frame(audio_codec_ctx, frame) == 0)
                     {
-                        while (pcm_buffer.size() > AUDIO_SAMPLE_RATE * 4 * 2 && is_running && !seek_requested)
+                        // Snap the master audio clock to the actual keyframe PTS FFmpeg landed on
+                        if (reset_audio_clock && frame->best_effort_timestamp != AV_NOPTS_VALUE)
+                        {
+                            double actual_pts = frame->best_effort_timestamp * av_q2d(fmt_ctx->streams[audio_stream_index]->time_base);
+                            audio_clock.store(actual_pts);
+                            reset_audio_clock = false;
+                        }
+
+                        // Prevent decoding too far ahead in memory
+                        while (pcm_buffer.size() > AUDIO_SAMPLE_RATE * 4 * HIGH_WATERMARK_SEC && is_running && !seek_requested)
                         {
                             std::this_thread::sleep_for(std::chrono::milliseconds(10));
                         }
@@ -243,7 +312,6 @@ private:
                     }
                 }
             }
-
             av_packet_free(&pkt);
         }
         av_frame_free(&frame);
@@ -390,9 +458,12 @@ public:
     void stop()
     {
         is_running = false;
+        is_paused = true;
+
         video_pkt_cv.notify_all();
         audio_pkt_cv.notify_all();
         frame_cv.notify_all();
+        seek_cv.notify_all();
 
         if (demux_thread.joinable())
             demux_thread.join();
@@ -400,7 +471,10 @@ public:
             video_thread.join();
         if (audio_thread.joinable())
         {
-            ma_device_stop(&audio_device);
+            if (ma_device_get_state(&audio_device) == ma_device_state_started)
+            {
+                ma_device_stop(&audio_device);
+            }
             ma_device_uninit(&audio_device);
             audio_thread.join();
         }
@@ -429,8 +503,19 @@ public:
     void seek(double time_sec)
     {
         seek_pos_sec = std::max(0.0, time_sec);
-        audio_clock.store(seek_pos_sec.load());
+
+        std::unique_lock<std::mutex> lock(seek_mutex);
+
+        is_buffering = true;
         seek_requested = true;
+        seek_completed = false;
+
+        seek_cv.notify_all();
+        seek_cv.wait(lock, [this]
+                     { return seek_completed || !is_running; });
+
+        // Tell the audio worker to intercept the true PTS of the post-seek frame
+        reset_audio_clock = true;
     }
 
     void pause()
@@ -447,7 +532,10 @@ public:
         is_paused = false;
         if (audio_stream_index >= 0)
         {
-            ma_device_start(&audio_device);
+            if (ma_device_get_state(&audio_device) != ma_device_state_started)
+            {
+                ma_device_start(&audio_device);
+            }
         }
     }
 
@@ -455,7 +543,6 @@ public:
     {
         if (audio_stream_index >= 0)
         {
-            // Miniaudio takes float (0.0 to 1.0, and >1.0 for boost)
             ma_device_set_master_volume(&audio_device, std::max(0.0f, volume));
         }
     }
@@ -478,8 +565,10 @@ public:
         {
             py::gil_scoped_release release;
             std::unique_lock<std::mutex> lock(frame_mutex);
+
+            // Block Python completely if we are in the buffering state.
             frame_cv.wait(lock, [this]
-                          { return (!ready_frames.empty() && !seek_requested) || !is_running; });
+                          { return (!ready_frames.empty() && !seek_requested && !is_buffering) || !is_running; });
 
             if (!is_running && ready_frames.empty())
                 return py::none();
@@ -494,12 +583,10 @@ public:
                 frame_time = rgb_frame->pts * av_q2d(fmt_ctx->streams[video_stream_index]->time_base);
             }
 
-            // --- A/V SYNC LOGIC ---
             if (audio_stream_index >= 0 && frame_time > 0.0)
             {
                 double current_audio_time = audio_clock.load();
 
-                // TOO EARLY: Video is ahead of audio. WAIT.
                 if (frame_time > current_audio_time + 0.01)
                 {
                     lock.unlock();
@@ -507,7 +594,6 @@ public:
                     continue;
                 }
 
-                // TOO LATE: Video is lagging behind audio. DROP FRAME.
                 if (frame_time < current_audio_time - 0.1)
                 {
                     ready_frames.pop();
@@ -516,7 +602,6 @@ public:
                 }
             }
 
-            // It is exactly time to show this frame.
             ready_frames.pop();
             break;
         }
