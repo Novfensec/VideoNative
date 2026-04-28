@@ -385,6 +385,11 @@ public:
         av_dict_set(&opts, "reconnect_streamed", "1", 0);
         av_dict_set(&opts, "reconnect_delay_max", "5", 0);
         av_dict_set(&opts, "timeout", "10000000", 0);
+        av_dict_set(&opts, "rtsp_transport", "tcp", 0);
+
+        av_dict_set(&opts, "user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", 0);
+
+        av_dict_set(&opts, "headers", "Accept: */*\r\n", 0);
 
         if (avformat_open_input(&fmt_ctx, url.c_str(), nullptr, &opts) < 0)
         {

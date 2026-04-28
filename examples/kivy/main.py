@@ -2,7 +2,6 @@ import os
 from kivy.utils import platform
 import threading
 import queue
-import numpy as np
 
 if platform == "win":
     os.add_dll_directory(
@@ -68,7 +67,6 @@ class VideoWidget(Image):
             frame_arr = self.decoder.get_next_frame()
 
             if frame_arr is None:
-                # CRITICAL FIX: Only treat None as EOF if we didn't deliberately pause/seek
                 if self._running:
                     self.frame_queue.put(None)
                 break
@@ -94,8 +92,7 @@ class VideoWidget(Image):
             self.canvas.ask_update()
 
         except queue.Empty:
-            # Safe to pass here! The UI just freezes on the last frame while C++ is pre-rolling!
-            pass
+            self.stop()
 
     def play(self, *args) -> None:
         if self._running:
