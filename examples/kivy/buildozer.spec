@@ -56,7 +56,7 @@ requirements = python3, kivy==2.3.1, ffmpeg, videonative, pyjnius, android, http
 
 # (list) Supported orientations
 # Valid options are: landscape, portrait, portrait-reverse, landscape-reverse, or all
-orientation = portrait
+orientation = portrait, landscape
 
 # (list) List of services to declare
 # This is currently only relevant to Android services.
