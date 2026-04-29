@@ -11,6 +11,7 @@ ffmpeg: https://ffmpeg.org/
 ### Windows
 
 - Install visual cpp build tools for building on windows.
+    > Powershell
     ```powershell
     winget install Microsoft.VisualStudio.BuildTools
     ```
