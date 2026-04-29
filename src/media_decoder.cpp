@@ -1,5 +1,3 @@
-
-
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 
@@ -39,20 +37,20 @@ private:
     std::atomic<bool> is_running{false};
     std::atomic<bool> is_paused{false};
 
+    std::atomic<bool> is_eof{false};
+
     std::atomic<bool> is_buffering{true}; // Start in buffering state
     std::atomic<double> demuxed_video_time{0.0};
     const double HIGH_WATERMARK_SEC = 10.0;
     const double LOW_WATERMARK_SEC = 3.0;
     const double PREROLL_SEC = 3.0;
 
-    // --- SEEK SYNCHRONIZATION ---
     std::atomic<bool> seek_requested{false};
     std::atomic<double> seek_pos_sec{0.0};
     std::mutex seek_mutex;
     std::condition_variable seek_cv;
     bool seek_completed = false;
 
-    // --- A/V CLOCKS ---
     std::atomic<double> current_pts{0.0};
     std::atomic<double> audio_clock{0.0};
     std::atomic<bool> reset_audio_clock{false};
@@ -94,27 +92,27 @@ private:
     {
         MediaDecoder *decoder = (MediaDecoder *)pDevice->pUserData;
 
-        // Output silence if paused OR actively buffering (pre-rolling)
         if (!decoder || decoder->is_paused || decoder->is_buffering)
         {
             memset(pOutput, 0, frameCount * AUDIO_CHANNELS * sizeof(int16_t));
             return;
         }
 
-        decoder->audio_clock.store(decoder->audio_clock.load() + ((double)frameCount / AUDIO_SAMPLE_RATE));
         uint32_t bytes_needed = frameCount * AUDIO_CHANNELS * sizeof(int16_t);
-
         std::lock_guard<std::mutex> lock(decoder->pcm_mutex);
+
         if (decoder->pcm_buffer.size() >= bytes_needed)
         {
+            // We have data! Advance the clock naturally.
+            decoder->audio_clock.store(decoder->audio_clock.load() + ((double)frameCount / AUDIO_SAMPLE_RATE));
             memcpy(pOutput, decoder->pcm_buffer.data(), bytes_needed);
             decoder->pcm_buffer.erase(decoder->pcm_buffer.begin(), decoder->pcm_buffer.begin() + bytes_needed);
         }
         else
         {
-            memcpy(pOutput, decoder->pcm_buffer.data(), decoder->pcm_buffer.size());
-            memset((uint8_t *)pOutput + decoder->pcm_buffer.size(), 0, bytes_needed - decoder->pcm_buffer.size());
-            decoder->pcm_buffer.clear();
+            // If the network is slow and audio runs out, INSTANTLY re-enter the buffering state!
+            decoder->is_buffering = true;
+            memset(pOutput, 0, frameCount * AUDIO_CHANNELS * sizeof(int16_t)); // Output silence, DO NOT advance clock!
         }
     }
 
@@ -174,6 +172,7 @@ private:
                     std::lock_guard<std::mutex> lock(seek_mutex);
                     seek_requested = false;
                     seek_completed = true;
+                    is_eof = false;
                 }
 
                 seek_cv.notify_all();
@@ -182,7 +181,6 @@ private:
                 continue;
             }
 
-            // --- SMART BUFFER HEALTH CALCULATION ---
             double playback_time = current_pts.load();
             double demux_time = demuxed_video_time.load();
             double buffer_health_sec = std::max(0.0, demux_time - playback_time);
@@ -191,7 +189,7 @@ private:
             if (is_buffering && buffer_health_sec >= PREROLL_SEC)
             {
                 is_buffering = false;
-                frame_cv.notify_all(); // Wake up Kivy frame requests
+                frame_cv.notify_all();
             }
 
             // High Watermark Check: Do we have 10+ seconds? Go to sleep until we drop to 3 seconds.
@@ -207,6 +205,7 @@ private:
 
             if (av_read_frame(fmt_ctx, packet) >= 0)
             {
+                is_eof = false;
                 if (packet->stream_index == video_stream_index)
                 {
                     if (packet->pts != AV_NOPTS_VALUE)
@@ -227,12 +226,13 @@ private:
             }
             else
             {
-                // EOF Reached! Force resume if we were trying to pre-roll the end of the file.
+                // --- EOF LOGIC ---
+                is_eof = true;
                 if (is_buffering)
                 {
                     is_buffering = false;
-                    frame_cv.notify_all();
                 }
+                frame_cv.notify_all();
 
                 if (!seek_requested)
                 {
@@ -301,8 +301,7 @@ private:
                         std::vector<uint8_t> temp_buf(out_size);
                         uint8_t *out_ptr = temp_buf.data();
 
-                        int converted = swr_convert(swr_ctx, &out_ptr, out_samples,
-                                                    (const uint8_t **)frame->data, frame->nb_samples);
+                        int converted = swr_convert(swr_ctx, &out_ptr, out_samples, (const uint8_t **)frame->data, frame->nb_samples);
 
                         if (converted > 0)
                         {
@@ -378,6 +377,7 @@ private:
 public:
     MediaDecoder(const std::string &url) : source_url(url)
     {
+        py::gil_scoped_release release;
         avformat_network_init();
         AVDictionary *opts = nullptr;
         av_dict_set(&opts, "buffer_size", "10240000", 0);
@@ -385,11 +385,6 @@ public:
         av_dict_set(&opts, "reconnect_streamed", "1", 0);
         av_dict_set(&opts, "reconnect_delay_max", "5", 0);
         av_dict_set(&opts, "timeout", "10000000", 0);
-        av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-
-        av_dict_set(&opts, "user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", 0);
-
-        av_dict_set(&opts, "headers", "Accept: */*\r\n", 0);
 
         if (avformat_open_input(&fmt_ctx, url.c_str(), nullptr, &opts) < 0)
         {
@@ -462,6 +457,7 @@ public:
 
     void stop()
     {
+        py::gil_scoped_release release;
         is_running = false;
         is_paused = true;
 
@@ -500,26 +496,24 @@ public:
         return (double)fmt_ctx->duration / AV_TIME_BASE;
     }
 
-    double get_position()
-    {
-        return current_pts.load();
-    }
+    double get_position() { return current_pts.load(); }
 
     void seek(double time_sec)
     {
         seek_pos_sec = std::max(0.0, time_sec);
-
         std::unique_lock<std::mutex> lock(seek_mutex);
 
         is_buffering = true;
         seek_requested = true;
         seek_completed = false;
 
+        frame_cv.notify_all();
         seek_cv.notify_all();
+
+        py::gil_scoped_release release;
         seek_cv.wait(lock, [this]
                      { return seek_completed || !is_running; });
 
-        // Tell the audio worker to intercept the true PTS of the post-seek frame
         reset_audio_clock = true;
     }
 
@@ -527,9 +521,7 @@ public:
     {
         is_paused = true;
         if (audio_stream_index >= 0)
-        {
             ma_device_stop(&audio_device);
-        }
     }
 
     void resume()
@@ -547,9 +539,7 @@ public:
     void set_volume(float volume)
     {
         if (audio_stream_index >= 0)
-        {
             ma_device_set_master_volume(&audio_device, std::max(0.0f, volume));
-        }
     }
 
     float get_volume()
@@ -571,17 +561,23 @@ public:
             py::gil_scoped_release release;
             std::unique_lock<std::mutex> lock(frame_mutex);
 
-            // Block Python completely if we are in the buffering state.
+            if (ready_frames.empty() && is_running && !is_eof && !seek_requested && !is_buffering)
+            {
+                is_buffering = true;
+            }
+
             frame_cv.wait(lock, [this]
-                          { return (!ready_frames.empty() && !seek_requested && !is_buffering) || !is_running; });
+                          { return (!ready_frames.empty() && !is_buffering) || !is_running || is_eof || seek_requested; });
 
             if (!is_running && ready_frames.empty())
                 return py::none();
             if (seek_requested)
                 return py::none();
 
-            rgb_frame = ready_frames.front();
+            if (is_eof && ready_frames.empty())
+                return py::none();
 
+            rgb_frame = ready_frames.front();
             double frame_time = 0.0;
             if (rgb_frame->pts != AV_NOPTS_VALUE && video_stream_index >= 0)
             {
@@ -624,11 +620,7 @@ public:
             AVFrame* frame = reinterpret_cast<AVFrame*>(f);
             av_frame_free(&frame); });
 
-        return py::array_t<uint8_t>(
-            {height, width, 3},
-            {stride, (size_t)3, (size_t)1},
-            ptr,
-            free_when_done);
+        return py::array_t<uint8_t>({height, width, 3}, {stride, (size_t)3, (size_t)1}, ptr, free_when_done);
     }
 };
 

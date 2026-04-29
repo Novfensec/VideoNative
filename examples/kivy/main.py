@@ -36,16 +36,33 @@ class VideoWidget(Image):
 
     def on_filename(self, *args) -> None:
         if self.filename:
-            Clock.schedule_once(self.open_video, 1)
+            self.open_video()
 
     def open_video(self, *args) -> None:
-        self.decoder = videonative.MediaDecoder(self.filename)
-        self.decoder.start()
+        threading.Thread(target=self._background_load, daemon=True).start()
 
-        first_frame = self.decoder.get_next_frame()
-        if first_frame is None:
-            raise RuntimeError("Failed to read the first frame of the video.")
+    def _background_load(self):
+        """THIS RUNS IN THE BACKGROUND: Heavy network & FFmpeg initialization."""
+        try:
+            temp_decoder = videonative.MediaDecoder(self.filename)
+            temp_decoder.start()
 
+            first_frame = temp_decoder.get_next_frame()
+            
+            if first_frame is None:
+                raise RuntimeError("Failed to read the first frame of the video.")
+
+            Clock.schedule_once(
+                lambda dt: self._on_video_loaded(temp_decoder, first_frame), 0
+            )
+
+        except Exception as e:
+            print(f"Video Load Error: {e}")
+
+    def _on_video_loaded(self, loaded_decoder, first_frame) -> None:
+        """THIS RUNS ON THE UI THREAD: Safely updates Kivy widgets."""
+        self.decoder = loaded_decoder
+        
         self.height_px, self.width_px, _ = first_frame.shape
 
         self.texture = Texture.create(
@@ -92,7 +109,7 @@ class VideoWidget(Image):
             self.canvas.ask_update()
 
         except queue.Empty:
-            self.stop()
+            pass
 
     def play(self, *args) -> None:
         if self._running:
@@ -126,7 +143,6 @@ class VideoWidget(Image):
             self.decoder.stop()
 
     def pause(self, *args) -> None:
-        # CRITICAL FIX: Set running to False instantly to lock out the reader thread
         self._running = False 
         
         if self.decoder:
@@ -134,14 +150,12 @@ class VideoWidget(Image):
             
         Clock.unschedule(self.update_frame)
 
-        # Clear the queue to unblock the thread if it's stuck trying to put()
         while not self.frame_queue.empty():
             try:
                 self.frame_queue.get_nowait()
             except queue.Empty:
                 break
-                
-        # Lowered timeout. C++ yields instantly now, so we don't need to freeze the UI for a full second
+
         if self.read_thread and self.read_thread.is_alive():
             self.read_thread.join(timeout=0.2)
             self.read_thread = None
