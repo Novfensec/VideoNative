@@ -622,6 +622,11 @@ public:
 
         return py::array_t<uint8_t>({height, width, 3}, {stride, (size_t)3, (size_t)1}, ptr, free_when_done);
     }
+
+    bool get_is_buffering()
+    {
+        return is_buffering.load();
+    }
 };
 
 PYBIND11_MODULE(videonative, m)
@@ -638,5 +643,6 @@ PYBIND11_MODULE(videonative, m)
         .def("pause", &MediaDecoder::pause)
         .def("resume", &MediaDecoder::resume)
         .def("set_volume", &MediaDecoder::set_volume)
-        .def("get_volume", &MediaDecoder::get_volume);
+        .def("get_volume", &MediaDecoder::get_volume)
+        .def("is_buffering", &MediaDecoder::get_is_buffering);
 }
