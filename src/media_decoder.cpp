@@ -418,12 +418,34 @@ public:
             avcodec_parameters_to_context(audio_codec_ctx, fmt_ctx->streams[audio_stream_index]->codecpar);
             avcodec_open2(audio_codec_ctx, acodec, nullptr);
 
+// --- VERSION-AGNOSTIC AUDIO SETUP ---
+#if LIBAVCODEC_VERSION_MAJOR >= 59
+            // FFmpeg 5.0 and newer (Modern API)
             AVChannelLayout out_ch_layout;
             av_channel_layout_default(&out_ch_layout, AUDIO_CHANNELS);
             swr_alloc_set_opts2(&swr_ctx, &out_ch_layout, AV_SAMPLE_FMT_S16, AUDIO_SAMPLE_RATE,
                                 &fmt_ctx->streams[audio_stream_index]->codecpar->ch_layout,
                                 (enum AVSampleFormat)fmt_ctx->streams[audio_stream_index]->codecpar->format,
                                 fmt_ctx->streams[audio_stream_index]->codecpar->sample_rate, 0, nullptr);
+#else
+            // FFmpeg 4.x and older (Legacy API)
+            int64_t out_ch_layout = av_get_default_channel_layout(AUDIO_CHANNELS);
+            int64_t in_ch_layout = fmt_ctx->streams[audio_stream_index]->codecpar->channel_layout;
+            
+            if (in_ch_layout == 0) {
+                in_ch_layout = av_get_default_channel_layout(fmt_ctx->streams[audio_stream_index]->codecpar->channels);
+            }
+
+            swr_ctx = swr_alloc_set_opts(nullptr,
+                                         out_ch_layout,
+                                         AV_SAMPLE_FMT_S16,
+                                         AUDIO_SAMPLE_RATE,
+                                         in_ch_layout,
+                                         (enum AVSampleFormat)fmt_ctx->streams[audio_stream_index]->codecpar->format,
+                                         fmt_ctx->streams[audio_stream_index]->codecpar->sample_rate,
+                                         0, nullptr);
+#endif
+            
             swr_init(swr_ctx);
 
             ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
