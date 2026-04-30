@@ -431,8 +431,9 @@ public:
             // FFmpeg 4.x and older (Legacy API)
             int64_t out_ch_layout = av_get_default_channel_layout(AUDIO_CHANNELS);
             int64_t in_ch_layout = fmt_ctx->streams[audio_stream_index]->codecpar->channel_layout;
-            
-            if (in_ch_layout == 0) {
+
+            if (in_ch_layout == 0)
+            {
                 in_ch_layout = av_get_default_channel_layout(fmt_ctx->streams[audio_stream_index]->codecpar->channels);
             }
 
@@ -445,7 +446,7 @@ public:
                                          fmt_ctx->streams[audio_stream_index]->codecpar->sample_rate,
                                          0, nullptr);
 #endif
-            
+
             swr_init(swr_ctx);
 
             ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);

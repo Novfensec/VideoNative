@@ -26,6 +26,7 @@ class VideoWidget(Image):
     filename = StringProperty()
     _running = BooleanProperty(False)
     _paused = BooleanProperty(False)
+    was_running = BooleanProperty(False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
