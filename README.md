@@ -11,11 +11,12 @@ ffmpeg: https://ffmpeg.org/
 ### Windows
 
 - Install visual cpp build tools for building on windows.
-    ```powershell
+    ```cmd
     winget install Microsoft.VisualStudio.BuildTools
     ```
 
 - Download FFmpeg:
+    > Powershell
     ```powershell
     cd "$env:USERPROFILE\Downloads"
     wget https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip -OutFile ffmpeg.zip
