@@ -14,7 +14,7 @@ from kivy.clock import Clock
 from kivy.graphics.texture import Texture
 from kivy.core.window import Window
 from kivy.lang import Builder
-from kivy.properties import StringProperty, BooleanProperty
+from kivy.properties import StringProperty, BooleanProperty, NumericProperty, ObjectProperty
 
 import videonative
 
@@ -23,10 +23,22 @@ if platform not in ["android", "ios"]:
 Window.fullscreen = False
 
 class VideoWidget(Image):
+
     filename = StringProperty()
+
     _running = BooleanProperty(False)
-    _paused = BooleanProperty(False)
+
     was_running = BooleanProperty(False)
+
+    _paused = BooleanProperty(False)
+
+    current_pos = NumericProperty()
+
+    duration = NumericProperty()
+
+    current_pos_ratio = NumericProperty()
+
+    buffering = BooleanProperty(False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -49,7 +61,7 @@ class VideoWidget(Image):
             temp_decoder.start()
 
             first_frame = temp_decoder.get_next_frame()
-            
+
             if first_frame is None:
                 raise RuntimeError("Failed to read the first frame of the video.")
 
@@ -63,7 +75,7 @@ class VideoWidget(Image):
     def _on_video_loaded(self, loaded_decoder, first_frame) -> None:
         """THIS RUNS ON THE UI THREAD: Safely updates Kivy widgets."""
         self.decoder = loaded_decoder
-        
+
         self.height_px, self.width_px, _ = first_frame.shape
 
         self.texture = Texture.create(
@@ -75,7 +87,7 @@ class VideoWidget(Image):
             first_frame.tobytes(), colorfmt="rgb", bufferfmt="ubyte"
         )
         self.canvas.ask_update()
-
+        self.duration = self.decoder.get_duration()
         self.fps = self.decoder.get_fps()
         self.play()
 
@@ -86,19 +98,30 @@ class VideoWidget(Image):
 
             if frame_arr is None:
                 if self._running:
-                    self.frame_queue.put(None)
+                    try:
+                        self.frame_queue.put(None, timeout=0.1)
+                    except queue.Full:
+                        pass
                 break
 
-            self.frame_queue.put(frame_arr.tobytes())
+            while self._running:
+                try:
+                    self.frame_queue.put(frame_arr.tobytes(), timeout=0.1)
+                    break
+                except queue.Full:
+                    continue
 
     def update_frame(self, dt) -> None:
-        """THIS RUNS ON THE UI THREAD: Grabs bytes from the queue and draws them."""
         try:
             frame_bytes = self.frame_queue.get_nowait()
 
+            if self.buffering:
+                self.buffering = False
+
             if frame_bytes is None:
+                self.current_pos = self.duration
+                self.current_pos_ratio = 1.0
                 self.pause()
-                self.decoder.stop()
                 return
 
             self.texture.blit_buffer(
@@ -108,15 +131,22 @@ class VideoWidget(Image):
                 bufferfmt="ubyte",
             )
             self.canvas.ask_update()
+            self.current_pos = self.decoder.get_position()
+            self.current_pos_ratio = self.current_pos / self.duration
 
         except queue.Empty:
-            pass
+            if self.decoder:
+                self.buffering = self.decoder.is_buffering()
 
     def play(self, *args) -> None:
         if self._running:
             return
 
+        if self.duration > 0 and self.current_pos >= self.duration - 0.2:
+            self.seek(-self.current_pos)
+
         self._running = True
+        self._paused = False
 
         if self.decoder:
             self.decoder.start()
@@ -129,6 +159,7 @@ class VideoWidget(Image):
 
     def stop(self, *args) -> None:
         self._running = False
+        self._paused = False
         Clock.unschedule(self.update_frame)
 
         while not self.frame_queue.empty():
@@ -137,18 +168,20 @@ class VideoWidget(Image):
             except queue.Empty:
                 break
 
-        if self.read_thread and self.read_thread.is_alive():
-            self.read_thread.join(timeout=0.5)
-
         if self.decoder:
             self.decoder.stop()
 
+        if self.read_thread and self.read_thread.is_alive():
+            self.read_thread.join(timeout=1.0)
+        self.read_thread = None
+
     def pause(self, *args) -> None:
-        self._running = False 
-        
+        self._running = False
+        self._paused = True
+
         if self.decoder:
             self.decoder.pause()
-            
+
         Clock.unschedule(self.update_frame)
 
         while not self.frame_queue.empty():
@@ -164,18 +197,60 @@ class VideoWidget(Image):
     def seek(self, offset: float | int) -> None:
         if not self.decoder:
             return
-            
-        was_running = self._running
-        current_pos = self.decoder.get_position()
-        
-        if was_running:
-            self.pause() 
 
-        new_pos = max(0.0, current_pos + offset)
+        was_running = self._running
+        new_pos = max(0.0, min(self.duration, self.current_pos + offset))
+
+        self.current_pos = new_pos
+        self.current_pos_ratio = self.current_pos / self.duration
+
+        self._running = False
+        Clock.unschedule(self.update_frame)
+
+        if self.decoder:
+            self.decoder.pause()
+
         self.decoder.seek(new_pos)
+
+        while not self.frame_queue.empty():
+            try:
+                self.frame_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        if self.read_thread and self.read_thread.is_alive():
+            self.read_thread.join(timeout=1.0)
+        self.read_thread = None
 
         if was_running:
             self.play()
+
+    def on_buffering(self, *args) -> None:
+        print("Buffering.....")
+
+    def set_volume(self, volume: float) -> None:
+        if self.decoder:
+            clamped_vol = max(0.0, min(1.0, volume))
+            self.decoder.set_volume(clamped_vol)
+
+    def restart(self, url: str, *args) -> None:
+        """Safely stops the current video, frees memory, and starts a new one."""
+        self.buffering = True
+
+        self.stop()
+        self.decoder = None
+
+        self.current_pos = 0.0
+        self.current_pos_ratio = 0.0
+        self.duration = 0.0
+
+        self.texture = None
+        self.canvas.ask_update()
+
+        if self.filename == url:
+            self.open_video()
+        else:
+            self.filename = url
 
 class VideoApp(CarbonApp):
 
