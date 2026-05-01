@@ -28,7 +28,6 @@ Homepage = "https://github.com/Novfensec/videonative"
 Repository = "https://github.com/Novfensec"
 
 [tool.scikit-build]
-minimum-version = "3.15"
 wheel.expand-macos-universal-tags = true
 
 [tool.scikit-build.cmake.define]
