@@ -1,8 +1,36 @@
 [build-system]
-requires = ["scikit-build-core", "pybind11"]
+requires = ["scikit-build-core>=0.4.3", "pybind11>=2.10.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "videonative"
 version = "1.0.0"
-description = "Rendering videos in Python."
+description = "Native C++ FFmpeg media decoder for Kivy."
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Kartavya Shukla" }
+]
+dependencies = [
+    "numpy>=1.20.0"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video",
+]
+
+[project.urls]
+Homepage = "https://github.com/Novfensec/videonative"
+Repository = "https://github.com/Novfensec"
+
+[tool.scikit-build]
+minimum-version = "3.15"
+wheel.expand-macos-universal-tags = true
+
+[tool.scikit-build.cmake.define]
+CMAKE_CXX_STANDARD = "17"
+CMAKE_CXX_STANDARD_REQUIRED = "ON"

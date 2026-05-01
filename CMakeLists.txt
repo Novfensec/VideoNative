@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
 
+find_package(Threads REQUIRED)
+
 if(WIN32)
     set(DEFAULT_FFMPEG_DIR "$ENV{USERPROFILE}/Downloads/ffmpeg")
     set(FFMPEG_DIR "${DEFAULT_FFMPEG_DIR}" CACHE PATH "Path to FFmpeg root directory.")
@@ -46,7 +48,10 @@ if(WIN32 OR ANDROID)
         swresample
     )
 else()
-    target_link_libraries(videonative PRIVATE PkgConfig::FFMPEG)
+    target_link_libraries(videonative PRIVATE 
+        PkgConfig::FFMPEG
+        Threads::Threads
+    )
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
