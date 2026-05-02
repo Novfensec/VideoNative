@@ -10,7 +10,12 @@ find_package(pybind11 CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
 if(WIN32)
-    set(DEFAULT_FFMPEG_DIR "$ENV{USERPROFILE}/Downloads/ffmpeg")
+    if(DEFINED ENV{DEFAULT_FFMPEG_DIR})
+        set(DEFAULT_FFMPEG_DIR "$ENV{DEFAULT_FFMPEG_DIR}")
+    else()
+        set(DEFAULT_FFMPEG_DIR "$ENV{USERPROFILE}/Downloads/ffmpeg")
+    endif()
+
     set(FFMPEG_DIR "${DEFAULT_FFMPEG_DIR}" CACHE PATH "Path to FFmpeg root directory.")
 
     set(FFMPEG_INCLUDE_DIRS "${FFMPEG_DIR}/include")
