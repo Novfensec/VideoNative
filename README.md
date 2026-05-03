@@ -81,6 +81,7 @@ Install the necessary development headers and media libraries:
 ```bash
 sudo apt update
 sudo apt install build-essential pkg-config ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+pip install ninja cmake
 ```
 
 #### 2. Installation
