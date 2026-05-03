@@ -64,9 +64,7 @@ pip install https://github.com/Novfensec/VideoNative/archive/main.zip --no-cache
 
 **Option B: Build the extension locally**
 ```bash
-# Using Python build front-end
-pip install build
-python -m build
+pip install -e .
 
 # OR using CMake directly
 mkdir build
@@ -94,7 +92,6 @@ pip install https://github.com/Novfensec/VideoNative/archive/main.zip --no-cache
 
 **Option B: Build the extension locally**
 ```bash
-# Using Python build front-end
 pip install -e .
 
 # OR using CMake directly
