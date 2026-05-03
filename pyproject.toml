@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "videonative"
 version = "1.0.0"
-description = "Rendering videos in python."
+description = "High-performance video rendering in Python powered by C++, FFmpeg, and miniaudio."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
