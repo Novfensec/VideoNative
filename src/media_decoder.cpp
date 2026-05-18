@@ -22,6 +22,7 @@ extern "C"
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/hwcontext.h>
 }
 
 namespace py = pybind11;
@@ -57,9 +58,19 @@ private:
 
     AVFormatContext *fmt_ctx = nullptr;
     AVCodecContext *video_codec_ctx = nullptr;
+    const AVCodec *video_codec = nullptr;
     SwsContext *sws_ctx = nullptr;
     int video_stream_index = -1;
     int width = 0, height = 0;
+    bool video_codec_opened = false;
+
+    int sws_last_width = 0;
+    int sws_last_height = 0;
+    int sws_last_format = -1;
+
+    AVBufferRef *hw_device_ctx = nullptr;
+    enum AVHWDeviceType hw_type = AV_HWDEVICE_TYPE_NONE;
+    enum AVPixelFormat hw_pix_fmt = AV_PIX_FMT_NONE;
 
     AVCodecContext *audio_codec_ctx = nullptr;
     SwrContext *swr_ctx = nullptr;
@@ -87,6 +98,20 @@ private:
 
     std::mutex video_codec_mutex;
     std::mutex audio_codec_mutex;
+
+    static enum AVPixelFormat get_hw_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts)
+    {
+        MediaDecoder *decoder = (MediaDecoder *)ctx->opaque;
+        for (const enum AVPixelFormat *p = pix_fmts; *p != -1; p++)
+        {
+            if (*p == decoder->hw_pix_fmt)
+            {
+                return *p;
+            }
+        }
+        std::cerr << "Failed to negotiate HW pixel format. Falling back to software decoding." << std::endl;
+        return pix_fmts[0];
+    }
 
     static void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount)
     {
@@ -143,7 +168,7 @@ private:
         }
         pcm_buffer.clear();
 
-        if (video_codec_ctx)
+        if (video_codec_ctx && video_codec_opened)
             avcodec_flush_buffers(video_codec_ctx);
         if (audio_codec_ctx)
             avcodec_flush_buffers(audio_codec_ctx);
@@ -382,19 +407,52 @@ private:
                             is_fast_forwarding = false;
                         }
 
-                        AVFrame *rgb_frame = av_frame_alloc();
-                        rgb_frame->format = AV_PIX_FMT_RGB24;
-                        rgb_frame->width = width;
-                        rgb_frame->height = height;
+                        AVFrame *sw_frame = frame;
+                        AVFrame *tmp_frame = nullptr;
 
-                        rgb_frame->pts = frame->best_effort_timestamp;
+                        if (frame->format == hw_pix_fmt && hw_pix_fmt != AV_PIX_FMT_NONE)
+                        {
+                            tmp_frame = av_frame_alloc();
+                            if (av_hwframe_transfer_data(tmp_frame, frame, 0) >= 0)
+                            {
+                                tmp_frame->pts = frame->pts;
+                                tmp_frame->best_effort_timestamp = frame->best_effort_timestamp;
+                                sw_frame = tmp_frame;
+                            }
+                            else
+                            {
+                                std::cerr << "Hardware copy failed. Skipping frame." << std::endl;
+                                av_frame_free(&tmp_frame);
+                                continue;
+                            }
+                        }
 
-                        av_frame_get_buffer(rgb_frame, 1);
-                        sws_scale(sws_ctx, (const uint8_t *const *)frame->data, frame->linesize,
-                                  0, height, rgb_frame->data, rgb_frame->linesize);
+                        if (!sws_ctx || sws_last_width != sw_frame->width || sws_last_height != sw_frame->height || sws_last_format != sw_frame->format)
+                        {
+                            if (sws_ctx)
+                                sws_freeContext(sws_ctx);
+                            sws_ctx = sws_getContext(sw_frame->width, sw_frame->height, (enum AVPixelFormat)sw_frame->format,
+                                                     width, height, AV_PIX_FMT_NV12, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                            sws_last_width = sw_frame->width;
+                            sws_last_height = sw_frame->height;
+                            sws_last_format = sw_frame->format;
+                        }
+
+                        AVFrame *nv12_frame = av_frame_alloc();
+                        nv12_frame->format = AV_PIX_FMT_NV12;
+                        nv12_frame->width = width;
+                        nv12_frame->height = height;
+                        nv12_frame->pts = frame->best_effort_timestamp;
+
+                        av_frame_get_buffer(nv12_frame, 1);
+                        sws_scale(sws_ctx, (const uint8_t *const *)sw_frame->data, sw_frame->linesize,
+                                  0, sw_frame->height, nv12_frame->data, nv12_frame->linesize);
+
+                        if (tmp_frame)
+                            av_frame_free(&tmp_frame);
 
                         std::lock_guard<std::mutex> lock(frame_mutex);
-                        ready_frames.push(rgb_frame);
+                        ready_frames.push(nv12_frame);
                         frame_cv.notify_one();
                     }
                 }
@@ -428,16 +486,13 @@ public:
             throw std::runtime_error("FFmpeg failed to find stream info.");
         }
 
-        video_stream_index = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+        video_stream_index = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &video_codec, 0);
         if (video_stream_index >= 0)
         {
-            const AVCodec *codec = avcodec_find_decoder(fmt_ctx->streams[video_stream_index]->codecpar->codec_id);
-            video_codec_ctx = avcodec_alloc_context3(codec);
+            video_codec_ctx = avcodec_alloc_context3(video_codec);
             avcodec_parameters_to_context(video_codec_ctx, fmt_ctx->streams[video_stream_index]->codecpar);
-            avcodec_open2(video_codec_ctx, codec, nullptr);
             width = video_codec_ctx->width;
             height = video_codec_ctx->height;
-            sws_ctx = sws_getContext(width, height, video_codec_ctx->pix_fmt, width, height, AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
         }
 
         audio_stream_index = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
@@ -487,12 +542,74 @@ public:
         }
     }
 
-    ~MediaDecoder() { stop(); }
+    ~MediaDecoder()
+    {
+        stop();
+
+        if (sws_ctx)
+            sws_freeContext(sws_ctx);
+        if (swr_ctx)
+            swr_free(&swr_ctx);
+        if (video_codec_ctx)
+            avcodec_free_context(&video_codec_ctx);
+        if (audio_codec_ctx)
+            avcodec_free_context(&audio_codec_ctx);
+        if (fmt_ctx)
+            avformat_close_input(&fmt_ctx);
+
+        if (hw_device_ctx)
+        {
+            av_buffer_unref(&hw_device_ctx);
+        }
+    }
+
+    bool enable_gpu()
+    {
+        if (video_codec_opened || video_stream_index < 0)
+            return false;
+
+        for (int i = 0;; i++)
+        {
+            const AVCodecHWConfig *config = avcodec_get_hw_config(video_codec, i);
+            if (!config)
+                break;
+
+            if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
+            {
+                int err = av_hwdevice_ctx_create(&hw_device_ctx, config->device_type, nullptr, nullptr, 0);
+                if (err == 0)
+                {
+                    hw_type = config->device_type;
+                    hw_pix_fmt = config->pix_fmt;
+
+                    video_codec_ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+                    video_codec_ctx->opaque = this;
+                    video_codec_ctx->get_format = get_hw_format;
+
+                    std::cout << "Hardware acceleration enabled: " << av_hwdevice_get_type_name(config->device_type) << std::endl;
+                    break;
+                }
+            }
+        }
+
+        if (avcodec_open2(video_codec_ctx, video_codec, nullptr) < 0)
+            return false;
+
+        video_codec_opened = true;
+        return (hw_type != AV_HWDEVICE_TYPE_NONE);
+    }
 
     void start()
     {
         if (is_running)
             return;
+
+        if (!video_codec_opened && video_stream_index >= 0)
+        {
+            avcodec_open2(video_codec_ctx, video_codec, nullptr);
+            video_codec_opened = true;
+        }
+
         is_running = true;
 
         demux_thread = std::thread(&MediaDecoder::demux_worker, this);
@@ -547,16 +664,11 @@ public:
     }
 
     double get_position()
-
     {
-
         if (audio_stream_index >= 0)
-
         {
-
             return audio_clock.load();
         }
-
         return current_pts.load();
     }
 
@@ -616,7 +728,7 @@ public:
 
     py::object get_next_frame()
     {
-        AVFrame *rgb_frame = nullptr;
+        AVFrame *nv12_frame = nullptr;
 
         while (true)
         {
@@ -639,11 +751,11 @@ public:
             if (is_eof && ready_frames.empty())
                 return py::none();
 
-            rgb_frame = ready_frames.front();
+            nv12_frame = ready_frames.front();
             double frame_time = 0.0;
-            if (rgb_frame->pts != AV_NOPTS_VALUE && video_stream_index >= 0)
+            if (nv12_frame->pts != AV_NOPTS_VALUE && video_stream_index >= 0)
             {
-                frame_time = rgb_frame->pts * av_q2d(fmt_ctx->streams[video_stream_index]->time_base);
+                frame_time = nv12_frame->pts * av_q2d(fmt_ctx->streams[video_stream_index]->time_base);
             }
 
             if (audio_stream_index >= 0 && frame_time > 0.0)
@@ -660,7 +772,7 @@ public:
                 if (frame_time < current_audio_time - 0.1)
                 {
                     ready_frames.pop();
-                    av_frame_free(&rgb_frame);
+                    av_frame_free(&nv12_frame);
                     continue;
                 }
             }
@@ -669,20 +781,32 @@ public:
             break;
         }
 
-        if (rgb_frame->pts != AV_NOPTS_VALUE && video_stream_index >= 0)
+        if (nv12_frame->pts != AV_NOPTS_VALUE && video_stream_index >= 0)
         {
-            current_pts = rgb_frame->pts * av_q2d(fmt_ctx->streams[video_stream_index]->time_base);
+            current_pts = nv12_frame->pts * av_q2d(fmt_ctx->streams[video_stream_index]->time_base);
         }
 
-        uint8_t *ptr = rgb_frame->data[0];
-        size_t stride = rgb_frame->linesize[0];
+        int w = nv12_frame->width;
+        int h = nv12_frame->height;
 
-        py::capsule free_when_done(rgb_frame, [](void *f)
-                                   {
-            AVFrame* frame = reinterpret_cast<AVFrame*>(f);
-            av_frame_free(&frame); });
+        std::vector<uint8_t> y_plane(w * h);
+        for (int i = 0; i < h; i++)
+        {
+            memcpy(y_plane.data() + (i * w), nv12_frame->data[0] + (i * nv12_frame->linesize[0]), w);
+        }
 
-        return py::array_t<uint8_t>({height, width, 3}, {stride, (size_t)3, (size_t)1}, ptr, free_when_done);
+        std::vector<uint8_t> uv_plane(w * h / 2);
+        for (int i = 0; i < h / 2; i++)
+        {
+            memcpy(uv_plane.data() + (i * w), nv12_frame->data[1] + (i * nv12_frame->linesize[1]), w);
+        }
+
+        py::bytes py_y(reinterpret_cast<const char *>(y_plane.data()), y_plane.size());
+        py::bytes py_uv(reinterpret_cast<const char *>(uv_plane.data()), uv_plane.size());
+
+        av_frame_free(&nv12_frame);
+
+        return py::make_tuple(py_y, py_uv, w, h);
     }
 
     bool get_is_buffering()
@@ -695,6 +819,7 @@ PYBIND11_MODULE(videonative, m)
 {
     py::class_<MediaDecoder>(m, "MediaDecoder")
         .def(py::init<const std::string &>())
+        .def("enable_gpu", &MediaDecoder::enable_gpu)
         .def("start", &MediaDecoder::start)
         .def("stop", &MediaDecoder::stop)
         .def("get_next_frame", &MediaDecoder::get_next_frame)
