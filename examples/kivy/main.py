@@ -10,12 +10,13 @@ if platform == "win":
     )  
 
 from carbonkivy.app import CarbonApp
-from kivy.uix.image import Image
+from kivy.uix.widget import Widget
 from kivy.clock import Clock
 from kivy.graphics.texture import Texture
+from kivy.graphics import RenderContext, BindTexture, Rectangle, Color
 from kivy.core.window import Window
 from kivy.lang import Builder
-from kivy.properties import StringProperty, BooleanProperty, NumericProperty
+from kivy.properties import StringProperty, BooleanProperty, NumericProperty, ColorProperty
 
 import videonative
 
@@ -23,8 +24,31 @@ if platform not in ["android", "ios"]:
     Window.maximize()
 Window.fullscreen = False
 
-class VideoWidget(Image):
+NV12_SHADER = """$HEADER$
+uniform sampler2D tex_uv;
+uniform vec4 bg_color;
+uniform float video_ready;
+
+void main(void) {
+    if (video_ready < 0.5) {
+        gl_FragColor = frag_color * bg_color;
+    } else {
+        float y = texture2D(texture0, tex_coord0).r;
+        float u = texture2D(tex_uv, tex_coord0).r - 0.5;
+        float v = texture2D(tex_uv, tex_coord0).a - 0.5;
+        
+        float r = y + 1.402 * v;
+        float g = y - 0.344136 * u - 0.714136 * v;
+        float b = y + 1.772 * u;
+        
+        gl_FragColor = frag_color * vec4(r, g, b, 1.0);
+    }
+}
+"""
+
+class VideoWidget(Widget):
     filename = StringProperty()
+    initial_color = ColorProperty([0.0, 0.0, 0.0, 1.0])
     _running = BooleanProperty(False)
     _paused = BooleanProperty(False)
     current_pos = NumericProperty(0.0)
@@ -38,7 +62,56 @@ class VideoWidget(Image):
         self.frame_queue = queue.Queue(maxsize=3)
         self.read_thread = None
         self.decoder = None
-        self._seek_lock = threading.Lock() # Prevents overlapping seek threads
+        self._seek_lock = threading.Lock()
+        
+        self.width_px = 0
+        self.height_px = 0
+        self.tex_y = None
+        self.tex_uv = None
+        
+        self.canvas = RenderContext(use_parent_modelview=True, use_parent_projection=True)
+        self.canvas.shader.fs = NV12_SHADER
+        
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            self.bind_uv = BindTexture(index=1)
+            self.rect = Rectangle(size=self.size, pos=self.pos)
+            
+        self.canvas['tex_uv'] = 1
+        self.canvas['video_ready'] = 0.0
+        self.canvas['bg_color'] = list(self.initial_color)
+        
+        self.bind(pos=self._update_rect, size=self._update_rect)
+
+    def _update_rect(self, *args):
+        if not self.width_px or not self.height_px:
+            self.rect.pos = self.pos
+            self.rect.size = self.size
+            return
+
+        widget_w, widget_h = self.size
+        if widget_h == 0 or widget_w == 0:
+            return
+
+        video_ratio = self.width_px / self.height_px
+        widget_ratio = widget_w / widget_h
+
+        if widget_ratio > video_ratio:
+            fit_h = widget_h
+            fit_w = fit_h * video_ratio
+        else:
+            fit_w = widget_w
+            fit_h = fit_w / video_ratio
+
+        pos_x = self.x + (widget_w - fit_w) / 2.0
+        pos_y = self.y + (widget_h - fit_h) / 2.0
+
+        self.rect.size = (fit_w, fit_h)
+        self.rect.pos = (pos_x, pos_y)
+
+    def on_initial_color(self, instance, value):
+        if self.canvas:
+            self.canvas['bg_color'] = value
 
     def on_filename(self, *args) -> None:
         if self.filename:
@@ -52,40 +125,42 @@ class VideoWidget(Image):
         """THIS RUNS IN THE BACKGROUND: Heavy network & FFmpeg initialization."""
         try:
             temp_decoder = videonative.MediaDecoder(self.filename)
+            temp_decoder.enable_gpu()
             temp_decoder.start()
 
-            first_frame = temp_decoder.get_next_frame()
+            first_frame_data = temp_decoder.get_next_frame()
 
-            if first_frame is None:
+            if first_frame_data is None:
                 raise RuntimeError("Failed to read the first frame of the video.")
 
-            # Convert to bytes here in the background to save UI thread time
-            frame_bytes = first_frame.tobytes()
-            height, width, _ = first_frame.shape
-
             Clock.schedule_once(
-                lambda dt: self._on_video_loaded(temp_decoder, frame_bytes, width, height), 0
+                lambda dt: self._on_video_loaded(temp_decoder, first_frame_data), 0
             )
 
         except Exception as e:
             print(f"Video Load Error: {e}")
             Clock.schedule_once(lambda dt: setattr(self, 'buffering', False), 0)
 
-    def _on_video_loaded(self, loaded_decoder, frame_bytes, width_px, height_px) -> None:
+    def _on_video_loaded(self, loaded_decoder, first_frame_data) -> None:
         """THIS RUNS ON THE UI THREAD: Safely updates Kivy widgets."""
         self.decoder = loaded_decoder
-        self.width_px = width_px
-        self.height_px = height_px
+        y_bytes, uv_bytes, self.width_px, self.height_px = first_frame_data
 
-        self.texture = Texture.create(
-            size=(self.width_px, self.height_px), colorfmt="rgb"
-        )
-        self.texture.flip_vertical()
+        self.tex_y = Texture.create(size=(self.width_px, self.height_px), colorfmt='luminance')
+        self.tex_y.flip_vertical()
+        
+        self.tex_uv = Texture.create(size=(self.width_px // 2, self.height_px // 2), colorfmt='luminance_alpha')
+        self.tex_uv.flip_vertical()
+        
+        self.tex_y.blit_buffer(y_bytes, colorfmt='luminance', bufferfmt='ubyte')
+        self.tex_uv.blit_buffer(uv_bytes, colorfmt='luminance_alpha', bufferfmt='ubyte')
 
-        self.texture.blit_buffer(
-            frame_bytes, colorfmt="rgb", bufferfmt="ubyte"
-        )
+        self.rect.texture = self.tex_y
+        self.bind_uv.texture = self.tex_uv
+        
+        self.canvas['video_ready'] = 1.0
         self.canvas.ask_update()
+        self._update_rect()
         
         self.duration = self.decoder.get_duration()
         self.fps = self.decoder.get_fps()
@@ -95,9 +170,9 @@ class VideoWidget(Image):
     def _reader_loop(self):
         """THIS RUNS IN THE BACKGROUND: Reads frames and serializes them."""
         while self._running and self.decoder:
-            frame_arr = self.decoder.get_next_frame()
+            frame_data = self.decoder.get_next_frame()
 
-            if frame_arr is None:
+            if frame_data is None:
                 if self._running:
                     try:
                         self.frame_queue.put(None, timeout=0.1)
@@ -105,37 +180,33 @@ class VideoWidget(Image):
                         pass
                 break
 
-            # PERFORMANCE FIX: Call tobytes() here in the background thread.
-            # This prevents the Kivy UI thread from doing heavy memory allocations.
-            frame_bytes = frame_arr.tobytes()
+            y_bytes, uv_bytes, _, _ = frame_data
 
             while self._running:
                 try:
-                    self.frame_queue.put(frame_bytes, timeout=0.1)
+                    self.frame_queue.put((y_bytes, uv_bytes), timeout=0.1)
                     break
                 except queue.Full:
                     continue
 
     def update_frame(self, dt) -> None:
-        """UI THREAD: Lightest possible operation - just blit the pre-computed bytes."""
         try:
-            frame_bytes = self.frame_queue.get_nowait()
+            frame_data = self.frame_queue.get_nowait()
 
             if self.buffering:
                 self.buffering = False
 
-            if frame_bytes is None:
+            if frame_data is None:
                 self.current_pos = self.duration
                 self.current_pos_ratio = 1.0
                 self.pause()
                 return
 
-            self.texture.blit_buffer(
-                frame_bytes,
-                size=(self.width_px, self.height_px),
-                colorfmt="rgb",
-                bufferfmt="ubyte",
-            )
+            y_bytes, uv_bytes = frame_data
+
+            self.tex_y.blit_buffer(y_bytes, colorfmt='luminance', bufferfmt='ubyte')
+            self.tex_uv.blit_buffer(uv_bytes, colorfmt='luminance_alpha', bufferfmt='ubyte')
+            
             self.canvas.ask_update()
             self.current_pos = self.decoder.get_position()
             
@@ -162,7 +233,6 @@ class VideoWidget(Image):
         self.read_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.read_thread.start()
 
-        # Update slightly faster than FPS to ensure we don't starve the queue
         Clock.schedule_interval(self.update_frame, 1.0 / (self.fps + 5))
 
     def stop(self, *args) -> None:
@@ -197,14 +267,13 @@ class VideoWidget(Image):
         if not self.decoder:
             return
 
-        # PERFORMANCE FIX: Don't block the UI thread waiting for the C++ seek.
         new_pos = max(0.0, min(self.duration, self.current_pos + offset))
         
         self.current_pos = new_pos
         if self.duration > 0:
             self.current_pos_ratio = self.current_pos / self.duration
             
-        self.buffering = True # Show UI loading indicator
+        self.buffering = True
         was_running = self._running
         
         self._running = False
@@ -212,30 +281,24 @@ class VideoWidget(Image):
         if self.decoder:
             self.decoder.pause()
 
-        # Fire and forget the background seek
         threading.Thread(target=self._background_seek, args=(new_pos, was_running), daemon=True).start()
 
     def _background_seek(self, new_pos, was_running):
-        """THIS RUNS IN THE BACKGROUND: Allows C++ to block without freezing UI."""
         with self._seek_lock:
             self.decoder.seek(new_pos)
             self._clear_queue()
-            
-            # Re-sync with main thread to resume playback/updates
             Clock.schedule_once(lambda dt: self._post_seek_resume(was_running), 0)
 
     def _post_seek_resume(self, was_running):
-        """UI THREAD: Resume state after background seek completes."""
         self.buffering = False
         if was_running:
             self.play()
         else:
-            # If paused, pull exactly one frame to update the UI to the new position
-            frame_arr = self.decoder.get_next_frame()
-            if frame_arr is not None:
-                self.texture.blit_buffer(
-                    frame_arr.tobytes(), size=(self.width_px, self.height_px), colorfmt="rgb", bufferfmt="ubyte"
-                )
+            frame_data = self.decoder.get_next_frame()
+            if frame_data is not None:
+                y_bytes, uv_bytes, _, _ = frame_data
+                self.tex_y.blit_buffer(y_bytes, colorfmt='luminance', bufferfmt='ubyte')
+                self.tex_uv.blit_buffer(uv_bytes, colorfmt='luminance_alpha', bufferfmt='ubyte')
                 self.canvas.ask_update()
 
     def _clear_queue(self):
@@ -258,6 +321,13 @@ class VideoWidget(Image):
         self.current_pos = 0.0
         self.current_pos_ratio = 0.0
         self.duration = 0.0
+        
+        self.tex_y = None
+        self.tex_uv = None
+        self.rect.texture = None
+        self.bind_uv.texture = None
+        self.canvas['video_ready'] = 0.0
+        self.canvas.ask_update()
 
         if self.filename == url:
             self.open_video()
@@ -280,6 +350,7 @@ class VideoApp(CarbonApp):
 
     def maximize(self, *args) -> None:
         Window.fullscreen = not Window.fullscreen
+
 
 if __name__ == "__main__":
     VideoApp().run()
