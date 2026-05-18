@@ -14,7 +14,7 @@ Video rendering in Python powered by C++, FFmpeg, and miniaudio.
 
 ## Overview
 
-**VideoNative** is a lightweight, low-level Python extension designed for efficient video and audio decoding. By leveraging native C++ bindings, it bridges high-performance media frameworks directly into Python applications.
+**VideoNative** is a lightweight, low-level Python extension designed for efficient video and audio decoding (with hardware acceleration support). By leveraging native C++ bindings, it bridges high-performance media frameworks directly into Python applications.
 
 ### Core Dependencies
 * [FFmpeg](https://ffmpeg.org/) - Industry-standard library for video decoding and scaling.
